@@ -8,11 +8,13 @@ FLOW_STATE_SIZE ?= 1000000  # 1M
 FLOW_SHARE_SIZE ?= 1000000  # 1M
 FLOW_QUEUE_SIZE ?= 10000
 
-cmd/balancer: cmd/balancer.go libbpf/src/libbpf.a bpf/bpf.o 
-	go build -o $@ cmd/balancer.go
+default: bpf/bpf.o
+
+example: bpf/bpf.o
+	cd balancer && $(MAKE)
 
 
-%.o: %.c libbpf/src
+%.o: %.c libbpf/src/libbpf.a
 	clang -S \
 	    -target bpf \
 	    -D FLOW_STATE_TYPE=$(FLOW_STATE_TYPE) \
@@ -37,10 +39,12 @@ libbpf/src/libbpf.a: libbpf
 	cd libbpf/src && $(MAKE)
 
 clean:
-	rm -f bpf/bpf.o cmd/balancer
+	rm -f bpf/bpf.o
+	cd balancer && $(MAKE) clean
 
 distclean: clean
 	rm -rf libbpf
+	cd balancer && $(MAKE) distclean
 
 ubuntu-dependencies:
 	apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.20 libyaml-perl libjson-perl ethtool
