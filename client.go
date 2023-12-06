@@ -54,7 +54,7 @@ type be_state struct {
 type Client struct {
 	mutex sync.Mutex
 
-	service map[svc]*service
+	service map[svc]*Service
 
 	netns netns
 	maps  *maps
@@ -78,7 +78,7 @@ func (b *Client) Start(address string, nic string, phy ...string) error {
 	b.vlans = map[uint16]prefix{}
 	b.nat_map = map[[2]IP4]uint16{}
 	b.tag_map = map[IP4]uint16{}
-	b.service = map[svc]*service{}
+	b.service = map[svc]*Service{}
 	b.hwaddr = map[IP4]MAC{}
 
 	b.update = make(chan bool, 1)
@@ -174,20 +174,12 @@ func (b *Client) update_arp() {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	//addr := map[IP4]bool{}
 	hwaddr := map[IP4]MAC{}
 
 	var changed bool
 
 	arp := b.arp()
 
-	//for _, service := range b.service {
-	//	for ip, _ := range service.backend {
-	//		addr[ip] = true
-	//	}
-	//}
-
-	//for ip, _ := range addr {
 	for _, ip := range b.nat_map.rip() {
 
 		new, ok := arp[ip]
@@ -283,8 +275,8 @@ func (b *Client) update_services() {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	for _, service := range b.service {
-		b.update_service(service, b.hwaddr, false)
+	for svc, service := range b.service {
+		b.update_service(svc, service, b.hwaddr, false)
 	}
 }
 
@@ -327,85 +319,83 @@ func (b *Client) Services() ([]ServiceExtended, error) {
 	return services, nil
 }
 
-func (b *Client) CreateService(x Service) error {
+func (b *Client) CreateService(s Service) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	s, err := x.service()
+	svc, err := s.svc_()
 
 	if err != nil {
 		return err
 	}
 
-	key := s.svc()
-
-	_, ok := b.service[key]
+	_, ok := b.service[svc]
 
 	if ok {
 		return errors.New("Exists")
 	}
 
-	b.maps.update_vrpp_counter(&bpf_vrpp{vip: s.VIP}, &bpf_counter{}, xdp.BPF_NOEXIST)
+	s.backend = map[IP4]*Destination{}
+	s.state = nil
 
-	b.update_service(s, b.hwaddr, true)
+	//b.maps.update_vrpp_counter(&bpf_vrpp{vip: s.VIP}, &bpf_counter{}, xdp.BPF_NOEXIST)
+	b.maps.update_vrpp_counter(&bpf_vrpp{vip: svc.IP}, &bpf_counter{}, xdp.BPF_NOEXIST)
 
-	b.service[key] = s
+	b.update_service(svc, &s, b.hwaddr, true)
+
+	b.service[svc] = &s
 
 	return nil
 }
 
-func (b *Client) RemoveService(x Service) error {
+func (b *Client) RemoveService(s Service) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	s, err := x.service()
+	svc, err := s.svc_()
 
 	if err != nil {
 		return err
 	}
 
-	key := s.svc()
-
-	service, ok := b.service[key]
+	service, ok := b.service[svc]
 
 	if !ok {
 		return errors.New("Service does not exist")
 	}
 
 	for ip, _ := range service.backend {
-		b.removeDestination(service, ip, true)
+		b.removeDestination(svc, service, ip, true)
 	}
 
-	sb := bpf_service{vip: s.VIP, port: htons(s.Port), protocol: uint8(s.Protocol)}
+	sb := bpf_service{vip: svc.IP, port: htons(s.Port), protocol: uint8(s.Protocol)}
 	xdp.BpfMapDeleteElem(b.maps.service_backend(), uP(&sb))
-	xdp.BpfMapDeleteElem(b.maps.vrpp_counter(), uP(&bpf_vrpp{vip: s.VIP}))
+	xdp.BpfMapDeleteElem(b.maps.vrpp_counter(), uP(&bpf_vrpp{vip: svc.IP}))
 
-	delete(b.service, key)
+	delete(b.service, svc)
 
 	b.locked_nat_map()
 
 	return nil
 }
 
-func (b *Client) CreateDestination(x Service, y Destination) error {
+func (b *Client) CreateDestination(s Service, d Destination) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	s, err := x.service()
+	svc, err := s.svc_()
 
 	if err != nil {
 		return err
 	}
 
-	key := s.svc()
-
-	service, ok := b.service[key]
+	service, ok := b.service[svc]
 
 	if !ok {
 		return errors.New("Service does not exist")
 	}
 
-	rip, d, err := y.destination()
+	rip, err := d.rip()
 
 	if err != nil {
 		return err
@@ -419,21 +409,21 @@ func (b *Client) CreateDestination(x Service, y Destination) error {
 
 	vid := b.tag1(rip)
 
-	d.VID = vid
+	//d.VID = vid
 
 	fmt.Println("VID", rip, vid)
 
 	b.tag_map.set(rip, vid)
 
-	service.backend[rip] = d
+	service.backend[rip] = &d
 
 	b.icmp.Ping(rip.String())
 
 	//fmt.Println("BE", service.backend)
 
-	b.update_service(service, b.hwaddr, false)
+	b.update_service(svc, service, b.hwaddr, false)
 
-	vr := bpf_vrpp{vip: s.VIP, rip: rip, port: htons(s.Port), protocol: uint8(s.Protocol)}
+	vr := bpf_vrpp{vip: svc.IP, rip: rip, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
 	b.maps.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
 	b.maps.update_vrpp_concurrent(A, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
 	b.maps.update_vrpp_concurrent(B, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
@@ -443,29 +433,27 @@ func (b *Client) CreateDestination(x Service, y Destination) error {
 	return nil
 }
 
-func (b *Client) Destinations(x Service) ([]DestinationExtended, error) {
+func (b *Client) Destinations(s Service) ([]DestinationExtended, error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
 	var destinations []DestinationExtended
 
-	s, err := x.service()
+	svc, err := s.svc_()
 
 	if err != nil {
 		return destinations, err
 	}
 
-	key := s.svc()
-
-	service, ok := b.service[key]
+	service, ok := b.service[svc]
 
 	if !ok {
 		return destinations, errors.New("Service does not exist")
 	}
 
-	vip := s.VIP
-	port := htons(s.Port)
-	protocol := uint8(s.Protocol)
+	vip := svc.IP
+	port := htons(svc.Port)
+	protocol := uint8(svc.Protocol)
 
 	for rip, d := range service.backend {
 		de := d.extend(rip)
@@ -481,25 +469,23 @@ func (b *Client) Destinations(x Service) ([]DestinationExtended, error) {
 	return destinations, nil
 }
 
-func (b *Client) RemoveDestination(x Service, y Destination) error {
+func (b *Client) RemoveDestination(s Service, d Destination) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	s, err := x.service()
+	svc, err := s.svc_()
 
 	if err != nil {
 		return err
 	}
 
-	key := s.svc()
-
-	service, ok := b.service[key]
+	service, ok := b.service[svc]
 
 	if !ok {
 		return errors.New("Service does not exist")
 	}
 
-	rip, _, err := y.destination()
+	rip, err := d.rip()
 
 	if err != nil {
 		return err
@@ -511,9 +497,9 @@ func (b *Client) RemoveDestination(x Service, y Destination) error {
 		return errors.New("Destination does not exist")
 	}
 
-	b.removeDestination(service, rip, false)
+	b.removeDestination(svc, service, rip, false)
 
-	b.update_service(service, b.hwaddr, false)
+	b.update_service(svc, service, b.hwaddr, false)
 
 	b.locked_nat_map()
 
@@ -522,22 +508,22 @@ func (b *Client) RemoveDestination(x Service, y Destination) error {
 
 /********************************************************************************/
 
-func (b *Client) removeDestination(s *service, rip IP4, bulk bool) {
+func (b *Client) removeDestination(svc svc, s *Service, rip IP4, bulk bool) {
 
 	delete(s.backend, rip)
 
 	if !bulk {
-		b.update_service(s, b.hwaddr, false)
+		b.update_service(svc, s, b.hwaddr, false)
 	}
 
-	vr := bpf_vrpp{vip: s.VIP, rip: rip, port: htons(s.Port), protocol: uint8(s.Protocol)}
+	vr := bpf_vrpp{vip: svc.IP, rip: rip, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
 	xdp.BpfMapDeleteElem(b.maps.vrpp_counter(), uP(&vr))
 	xdp.BpfMapDeleteElem(b.maps.vrpp_concurrent(), uP(&vr))
 	vr.pad = 1
 	xdp.BpfMapDeleteElem(b.maps.vrpp_concurrent(), uP(&vr))
 }
 
-func (b *Client) update_service(s *service, arp map[IP4]MAC, force bool) {
+func (b *Client) update_service(svc svc, s *Service, arp map[IP4]MAC, force bool) {
 
 	//fmt.Println("update_service", s, arp)
 
@@ -551,11 +537,11 @@ func (b *Client) update_service(s *service, arp map[IP4]MAC, force bool) {
 		vid := b.tag1(ip)
 		fmt.Println("******************************", ip, mac, vid)
 		if ip != nilip4 && mac != nilmac && real.Weight > 0 && vid < 4095 {
-			bpf_reals[ip] = bpf_real{rip: ip, mac: mac, vid: htons(real.VID)}
+			bpf_reals[ip] = bpf_real{rip: ip, mac: mac, vid: htons(vid)}
 		}
 	}
 
-	key := &bpf_service{vip: s.VIP, port: htons(s.Port), protocol: uint8(s.Protocol)}
+	key := &bpf_service{vip: svc.IP, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
 	val := &be_state{fallback: false, sticky: s.Sticky, bpf_reals: bpf_reals}
 
 	if s.Leastconns {
@@ -568,7 +554,7 @@ func (b *Client) update_service(s *service, arp map[IP4]MAC, force bool) {
 	if force || update_backend(val, s.state) {
 		b.maps.update_service_backend(key, &(val.bpf_backend), xdp.BPF_ANY)
 		//fmt.Println(val.bpf_backend)
-		fmt.Println("Updated table for ", s.svc(), val.bpf_backend.hash[:32], time.Now().Sub(now))
+		fmt.Println("Updated table for ", svc, val.bpf_backend.hash[:32], time.Now().Sub(now))
 		s.state = val
 	}
 

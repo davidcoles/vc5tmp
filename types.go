@@ -163,7 +163,7 @@ func (c *Client) targets() (r []IP4) {
 
 	t := map[IP4]bool{}
 
-	nm := c.nat_map.get() // locking handled internally
+	nm := c.nat_map.get()
 
 	for k, _ := range nm {
 		rip := k[1]
@@ -177,7 +177,7 @@ func (c *Client) targets() (r []IP4) {
 	return
 }
 
-type service struct {
+type _service struct {
 	VIP      IP4
 	Port     uint16
 	Protocol protocol
@@ -188,13 +188,13 @@ type service struct {
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
 
-	backend map[IP4]*destination
+	backend map[IP4]*Destination
 	state   *be_state
 }
 
-func (s *service) Service(x svc) Service {
+func (s *Service) Service(x svc) Service {
 	var r Service
-	r.Address = netip.AddrFrom4(s.VIP)
+	r.Address = s.Address //netip.AddrFrom4(s.VIP)
 	r.Port = s.Port
 	r.Protocol = s.Protocol
 	return r
@@ -211,70 +211,46 @@ type Service struct {
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
 
-	backend map[IP4]destination
+	backend map[IP4]*Destination
+	state   *be_state
 }
 type ServiceExtended struct {
 	Service Service
 }
 
-func (s *Service) service() (*service, error) {
-	var r service
+func (s *Service) svc_() (svc, error) {
 	if !s.Address.Is4() {
-		return nil, errors.New("Not IPv4")
+		return svc{}, errors.New("Not IPv4")
+		panic("Oops")
 	}
-
-	r.VIP = s.Address.As4()
-	r.Port = s.Port
-	r.Protocol = s.Protocol
-	r.backend = map[IP4]*destination{}
-	r.state = &be_state{}
-
-	return &r, nil
-}
-
-func (s *service) svc() svc {
-	return svc{IP: s.VIP, Port: s.Port, Protocol: s.Protocol}
+	ip := s.Address.As4()
+	return svc{IP: ip, Port: s.Port, Protocol: s.Protocol}, nil
 }
 
 type Destination struct {
 	Address netip.Addr
 	Weight  uint8
-	VID     uint16
 }
 
-func (d *Destination) destination() (IP4, *destination, error) {
-	var ip IP4
-
-	var r destination
+func (d *Destination) rip() (IP4, error) {
 	if !d.Address.Is4() {
-		return ip, nil, errors.New("Not IPv4")
+		return IP4{}, errors.New("Not IPv4")
 	}
 
-	ip = d.Address.As4()
-	r.Weight = d.Weight
-	r.VID = d.VID
-
-	return ip, &r, nil
+	return d.Address.As4(), nil
 }
 
-func (d *destination) extend(ip IP4) DestinationExtended {
+func (d *Destination) extend(ip IP4) DestinationExtended {
 	var de DestinationExtended
 	de.Destination.Address = netip.AddrFrom4(ip)
 	de.Destination.Weight = d.Weight
-	de.Destination.VID = d.VID
-	//de.MAC = d.mac
 	return de
-}
-
-type destination struct {
-	Weight uint8
-	VID    uint16
-	//mac    MAC
 }
 
 type DestinationExtended struct {
 	Destination Destination
 	MAC         MAC
+	VLAN        uint16
 	Packets     uint64
 	Octets      uint64
 	Flows       uint64
