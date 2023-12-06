@@ -8,7 +8,7 @@ FLOW_STATE_SIZE ?= 1000000  # 1M
 FLOW_SHARE_SIZE ?= 1000000  # 1M
 FLOW_QUEUE_SIZE ?= 10000
 
-cmd/balancer: cmd/balancer.go bpf/bpf.o libbpf/src/libbpf.a
+cmd/balancer: cmd/balancer.go libbpf/src/libbpf.a bpf/bpf.o 
 	go build -o $@ cmd/balancer.go
 
 
