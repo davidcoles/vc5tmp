@@ -30,8 +30,8 @@ var IP IP4 = IP4{10, 255, 255, 254}
 
 type netns struct {
 	IfA, IfB string
-	IpA, IpB [4]byte
-	HwA, HwB [6]byte
+	IpA, IpB IP4
+	HwA, HwB MAC
 	Index    int
 	NS       string
 

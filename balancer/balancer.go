@@ -80,7 +80,7 @@ func main() {
 	defer client.RemoveService(svc)
 
 	for _, r := range rip {
-		dst := vc5tmp.Destination{Address: netip.MustParseAddr(r), Weight: 1}
+		dst := vc5tmp.Destination{Address: netip.MustParseAddr(r), Weight: 0}
 		client.CreateDestination(svc, dst)
 	}
 
@@ -91,6 +91,15 @@ func main() {
 			session.Close()
 			sleep(3)
 		}()
+	}
+
+	sleep(10)
+
+	ds, _ := client.Destinations(svc)
+	for _, d := range ds {
+		d.Destination.Weight = 1
+		client.UpdateDestination(svc, d.Destination)
+		sleep(5)
 	}
 
 	sleep(10)

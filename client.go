@@ -230,7 +230,7 @@ func (b *Client) update_nat() {
 
 	var changed bool
 
-	nat := b.locked_NatEntries(nat_map, tag_map, b.hwaddr)
+	nat := b.nat_entries(nat_map, tag_map, b.hwaddr)
 
 	var updated, deleted int
 
@@ -242,7 +242,6 @@ func (b *Client) update_nat() {
 		if x, ok := old[k]; !ok || v != x {
 			changed = true
 			updated++
-			fmt.Println("+++", e)
 			xdp.BpfMapUpdateElem(b.maps.nat(), uP(&(e.key)), uP(&(e.val)), xdp.BPF_ANY)
 		}
 
@@ -250,14 +249,13 @@ func (b *Client) update_nat() {
 	}
 
 	for k, _ := range old {
-		//fmt.Println("---", k)
 		deleted++
 		xdp.BpfMapDeleteElem(b.maps.nat(), uP(&(k)))
 	}
 
 	b.nat = nat
 
-	fmt.Println("NAT: entries", len(nat), " updated", updated, " deleted", deleted)
+	fmt.Println("NAT: entries", len(nat), "updated", updated, "deleted", deleted)
 
 	// should determine if anything has changed (eg. MAC)
 
@@ -280,7 +278,7 @@ func (b *Client) update_services() {
 	}
 }
 
-func (b *Client) locked_nat_map() {
+func (b *Client) update_nat_map() {
 
 	nm := map[[2]IP4]bool{}
 
@@ -333,7 +331,7 @@ func (b *Client) CreateService(s Service) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	svc, err := s.svc_()
+	svc, err := s.svc()
 
 	if err != nil {
 		return err
@@ -348,12 +346,34 @@ func (b *Client) CreateService(s Service) error {
 	s.backend = map[IP4]*Destination{}
 	s.state = nil
 
-	//b.maps.update_vrpp_counter(&bpf_vrpp{vip: s.VIP}, &bpf_counter{}, xdp.BPF_NOEXIST)
+	b.service[svc] = &s
+
 	b.maps.update_vrpp_counter(&bpf_vrpp{vip: svc.IP}, &bpf_counter{}, xdp.BPF_NOEXIST)
 
 	b.update_service(svc, &s, b.hwaddr, true)
 
-	b.service[svc] = &s
+	return nil
+}
+
+func (b *Client) UpdateService(s Service) error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	svc, err := s.svc()
+
+	if err != nil {
+		return err
+	}
+
+	service, ok := b.service[svc]
+
+	if !ok {
+		return errors.New("Service does not exist")
+	}
+
+	service.update(s)
+
+	b.update_service(svc, service, b.hwaddr, false)
 
 	return nil
 }
@@ -362,7 +382,7 @@ func (b *Client) RemoveService(s Service) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	svc, err := s.svc_()
+	svc, err := s.svc()
 
 	if err != nil {
 		return err
@@ -384,7 +404,7 @@ func (b *Client) RemoveService(s Service) error {
 
 	delete(b.service, svc)
 
-	b.locked_nat_map()
+	b.update_nat_map()
 
 	return nil
 }
@@ -393,7 +413,7 @@ func (b *Client) CreateDestination(s Service, d Destination) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	svc, err := s.svc_()
+	svc, err := s.svc()
 
 	if err != nil {
 		return err
@@ -419,17 +439,11 @@ func (b *Client) CreateDestination(s Service, d Destination) error {
 
 	vid := b.tag1(rip)
 
-	//d.VID = vid
-
-	fmt.Println("VID", rip, vid)
-
 	b.tag_map.set(rip, vid)
 
 	service.backend[rip] = &d
 
 	b.icmp.Ping(rip.String())
-
-	//fmt.Println("BE", service.backend)
 
 	b.update_service(svc, service, b.hwaddr, false)
 
@@ -438,7 +452,7 @@ func (b *Client) CreateDestination(s Service, d Destination) error {
 	b.maps.update_vrpp_concurrent(A, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
 	b.maps.update_vrpp_concurrent(B, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
 
-	b.locked_nat_map()
+	b.update_nat_map()
 
 	return nil
 }
@@ -449,7 +463,7 @@ func (b *Client) Destinations(s Service) ([]DestinationExtended, error) {
 
 	var destinations []DestinationExtended
 
-	svc, err := s.svc_()
+	svc, err := s.svc()
 
 	if err != nil {
 		return destinations, err
@@ -480,11 +494,49 @@ func (b *Client) Destinations(s Service) ([]DestinationExtended, error) {
 	return destinations, nil
 }
 
+func (b *Client) UpdateDestination(s Service, d Destination) error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	svc, err := s.svc()
+
+	if err != nil {
+		return err
+	}
+
+	service, ok := b.service[svc]
+
+	if !ok {
+		return errors.New("Service does not exist")
+	}
+
+	rip, err := d.rip()
+
+	if err != nil {
+		return err
+	}
+
+	dest, ok := service.backend[rip]
+
+	if !ok {
+		return errors.New("Destination does not exist")
+	}
+
+	dest.Weight = d.Weight
+
+	select {
+	case b.update <- true:
+	default:
+	}
+
+	return nil
+}
+
 func (b *Client) RemoveDestination(s Service, d Destination) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
-	svc, err := s.svc_()
+	svc, err := s.svc()
 
 	if err != nil {
 		return err
@@ -512,7 +564,7 @@ func (b *Client) RemoveDestination(s Service, d Destination) error {
 
 	b.update_service(svc, service, b.hwaddr, false)
 
-	b.locked_nat_map()
+	b.update_nat_map()
 
 	return nil
 }
@@ -536,18 +588,12 @@ func (b *Client) removeDestination(svc svc, s *Service, rip IP4, bulk bool) {
 
 func (b *Client) update_service(svc svc, s *Service, arp map[IP4]MAC, force bool) {
 
-	//fmt.Println("update_service", s, arp)
-
 	bpf_reals := map[IP4]bpf_real{}
-
-	var nilip4 IP4
-	var nilmac MAC
 
 	for ip, real := range s.backend {
 		mac := arp[ip]
 		vid := b.tag1(ip)
-		fmt.Println("******************************", ip, mac, vid)
-		if ip != nilip4 && mac != nilmac && real.Weight > 0 && vid < 4095 {
+		if !ip.IsNil() && !mac.IsNil() && real.Weight > 0 && vid < 4095 {
 			bpf_reals[ip] = bpf_real{rip: ip, mac: mac, vid: htons(vid)}
 		}
 	}
@@ -555,20 +601,18 @@ func (b *Client) update_service(svc svc, s *Service, arp map[IP4]MAC, force bool
 	key := &bpf_service{vip: svc.IP, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
 	val := &be_state{fallback: false, sticky: s.Sticky, bpf_reals: bpf_reals}
 
-	if s.Leastconns {
-		val.leastconns = s.LeastconnsIP
-		val.weight = s.LeastconnsWeight
-	}
+	//if s.Leastconns {
+	//	val.leastconns = s.LeastconnsIP
+	//	val.weight = s.LeastconnsWeight
+	//}
 
 	now := time.Now()
 
 	if force || update_backend(val, s.state) {
 		b.maps.update_service_backend(key, &(val.bpf_backend), xdp.BPF_ANY)
-		//fmt.Println(val.bpf_backend)
 		fmt.Println("Updated table for ", svc, val.bpf_backend.hash[:32], time.Now().Sub(now))
 		s.state = val
 	}
-
 }
 
 func (m *Maps) set_map(name string, k, v int) (err error) {
@@ -683,9 +727,6 @@ func update_backend(curr, prev *be_state) bool {
 
 	var flag [4]byte
 
-	//const F_STICKY = 0x01
-	//const F_FALLBACK = 0x02
-
 	if curr.sticky {
 		flag[0] |= bpf.F_STICKY
 	}
@@ -695,14 +736,12 @@ func update_backend(curr, prev *be_state) bool {
 	}
 
 	mapper := map[[4]byte]uint8{}
-	//list := IP4s(make([]IP4, 0, len(curr.bpf_reals)))
+
 	var list []IP4
 
 	for ip, _ := range curr.bpf_reals {
 		list = append(list, ip)
 	}
-
-	//sort.Sort(list)
 
 	sort.SliceStable(list, func(i, j int) bool {
 		return nltoh(list[i]) < nltoh(list[j])
@@ -791,18 +830,13 @@ func (b *Client) ifaces() map[uint16]iface {
 	return VlanInterfaces(b.vlans)
 }
 
-func (b *Client) locked_NatEntries(nat_map map[[2]IP4]uint16, tag_map map[IP4]uint16, arp map[IP4]MAC) (nkv []natkeyval) {
+func (b *Client) nat_entries(nat_map nat_map, tag_map tag_map, arp map[IP4]MAC) (nkv []natkeyval) {
 
 	ifaces := VlanInterfaces(b.vlans)
 
 	for vid, iface := range ifaces {
-		fmt.Println("==============================", vid, iface)
 		b.maps.update_redirect(vid, iface.mac, iface.idx)
 	}
-
-	//fmt.Println("IFACES", ifaces)
-
-	var vlans bool = len(b.vlans) != 0
 
 	for k, v := range nat_map {
 		vip := k[0]
@@ -816,15 +850,9 @@ func (b *Client) locked_NatEntries(nat_map map[[2]IP4]uint16, tag_map map[IP4]ui
 			continue
 		}
 
-		if vlans && vid == 0 {
+		if (len(b.vlans) != 0 && vid == 0) || (len(b.vlans) == 0 && vid != 0) {
 			continue
 		}
-
-		if !vlans && vid != 0 {
-			continue
-		}
-
-		fmt.Println("!!!!", vip, rip, nat, vid, idx)
 
 		if vid == 0 {
 			idx = b.netns.phys
@@ -862,23 +890,13 @@ func (b *Client) natAddr(i uint16) IP4 {
 
 func (b *Client) natEntry(vip, rip, nat IP4, realhw MAC, vlanid uint16, idx iface) (ret []natkeyval) {
 
-	//var physif uint32 = b.netns.Physif
-	//var physhw MAC = b.netns.Physhw
-
 	vlanip := idx.ip4
-	//vlanhw := idx.mac
-	//vlanif := idx.idx
-
-	physif := idx.idx
-	//physip := idx.ip4
-	physhw := idx.mac
+	vlanhw := idx.mac
+	vlanif := idx.idx
 
 	var vc5bip IP4 = b.netns.IpB
 	var vc5bhw MAC = b.netns.HwB
 	var vc5ahw MAC = b.netns.HwA
-
-	fmt.Println("********************", physif, physhw)
-
 	var vethif uint32 = uint32(b.netns.Index)
 
 	if realhw.IsNil() {
@@ -886,11 +904,11 @@ func (b *Client) natEntry(vip, rip, nat IP4, realhw MAC, vlanid uint16, idx ifac
 	}
 
 	key := bpf_natkey{src_ip: vc5bip, dst_ip: nat, src_mac: vc5bhw, dst_mac: vc5ahw}
-	val := bpf_natval{src_ip: vlanip, dst_ip: vip, src_mac: physhw, dst_mac: realhw, ifindex: physif, vlan: vlanid}
+	val := bpf_natval{src_ip: vlanip, dst_ip: vip, src_mac: vlanhw, dst_mac: realhw, ifindex: vlanif, vlan: vlanid}
 
 	ret = append(ret, natkeyval{key: key, val: val})
 
-	key = bpf_natkey{src_ip: vip, src_mac: realhw, dst_ip: vlanip, dst_mac: physhw}
+	key = bpf_natkey{src_ip: vip, src_mac: realhw, dst_ip: vlanip, dst_mac: vlanhw}
 	val = bpf_natval{src_ip: nat, src_mac: vc5ahw, dst_ip: vc5bip, dst_mac: vc5bhw, ifindex: vethif}
 
 	ret = append(ret, natkeyval{key: key, val: val})
@@ -934,7 +952,6 @@ func VlanInterfaces(in map[uint16]prefix) map[uint16]iface {
 	out := map[uint16]iface{}
 
 	for vid, pref := range in {
-		//fmt.Println("VID", vid, pref)
 		if iface, ok := VlanInterface(pref); ok {
 			out[vid] = iface
 		}
@@ -978,13 +995,11 @@ func VlanInterface(prefix prefix) (ret iface, _ bool) {
 				cidr := a.String()
 				ip, ipnet, err := net.ParseCIDR(cidr)
 
-				//fmt.Println(ipnet.String(), "==", prefix.String())
-
 				if err == nil && ipnet.String() == prefix.String() {
-
 					ip4 := ip.To4()
 					if len(ip4) == 4 && ip4 != nil {
-						return iface{idx: uint32(i.Index), ip4: IP4{ip4[0], ip4[1], ip4[2], ip4[3]}, mac: mac}, true
+						//return iface{idx: uint32(i.Index), ip4: IP4{ip4[0], ip4[1], ip4[2], ip4[3]}, mac: mac}, true
+						return iface{idx: uint32(i.Index), ip4: IP4(ip4), mac: mac}, true
 					}
 				}
 			}

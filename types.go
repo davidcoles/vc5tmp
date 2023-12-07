@@ -42,10 +42,15 @@ var BPF_O []byte
 type IP4 [4]byte
 type MAC [6]byte
 
-func (i *IP4) String() string { return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3]) }
-func (i *IP4) IsNil() bool    { return i[0] == 0 && i[1] == 0 && i[2] == 0 && i[3] == 0 }
-func (i *MAC) IsNil() bool {
-	return i[0] == 0 && i[1] == 0 && i[2] == 0 && i[3] == 0 && i[4] == 0 && i[5] == 0
+func (i IP4) String() string { return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3]) }
+func (i *IP4) IsNil() bool   { return i[0] == 0 && i[1] == 0 && i[2] == 0 && i[3] == 0 }
+
+func (m MAC) String() string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
+}
+
+func (m *MAC) IsNil() bool {
+	return m[0] == 0 && m[1] == 0 && m[2] == 0 && m[3] == 0 && m[4] == 0 && m[5] == 0
 }
 
 type uP = unsafe.Pointer
@@ -197,6 +202,7 @@ func (s *Service) Service(x svc) Service {
 	r.Address = s.Address //netip.AddrFrom4(s.VIP)
 	r.Port = s.Port
 	r.Protocol = s.Protocol
+	r.backend = map[IP4]*Destination{}
 	return r
 }
 
@@ -205,11 +211,11 @@ type Service struct {
 	Port     uint16
 	Protocol protocol
 
-	Scheduler        uint8
-	Sticky           bool
-	Leastconns       bool
-	LeastconnsIP     IP4
-	LeastconnsWeight uint8
+	//Scheduler uint8
+	Sticky bool
+	//Leastconns       bool
+	//LeastconnsIP     IP4
+	//LeastconnsWeight uint8
 
 	backend map[IP4]*Destination
 	state   *be_state
@@ -219,7 +225,15 @@ type ServiceExtended struct {
 	Stats   Stats
 }
 
-func (s *Service) svc_() (svc, error) {
+func (s *Service) update(u Service) {
+	//s.Scheduler = u.Scheduler
+	s.Sticky = u.Sticky
+	//s.Leastconns = u.Leastconns
+	//s.LeastconnsIP = u.LeastconnsIP
+	//s.LeastconnsWeight = u.LeastconnsWeight
+}
+
+func (s *Service) svc() (svc, error) {
 	if !s.Address.Is4() {
 		return svc{}, errors.New("Not IPv4")
 		panic("Oops")
@@ -254,11 +268,12 @@ type Stats struct {
 	Flows   uint64
 }
 
+func (s Stats) String() string { return fmt.Sprintf("p:%d o:%d f:%d", s.Packets, s.Octets, s.Flows) }
+
 type DestinationExtended struct {
 	Destination Destination
 	MAC         MAC
 	Stats       Stats
-	//VLAN        uint16
 }
 
 func natmap(tuples map[[2]IP4]bool, previous map[[2]IP4]uint16) (mapping map[[2]IP4]uint16) {
