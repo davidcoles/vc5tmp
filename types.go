@@ -177,7 +177,7 @@ func (c *Client) targets() (r []IP4) {
 	return
 }
 
-type _service struct {
+type x_service struct {
 	VIP      IP4
 	Port     uint16
 	Protocol protocol
@@ -216,6 +216,7 @@ type Service struct {
 }
 type ServiceExtended struct {
 	Service Service
+	Stats   Stats
 }
 
 func (s *Service) svc_() (svc, error) {
@@ -247,13 +248,17 @@ func (d *Destination) extend(ip IP4) DestinationExtended {
 	return de
 }
 
+type Stats struct {
+	Packets uint64
+	Octets  uint64
+	Flows   uint64
+}
+
 type DestinationExtended struct {
 	Destination Destination
 	MAC         MAC
-	VLAN        uint16
-	Packets     uint64
-	Octets      uint64
-	Flows       uint64
+	Stats       Stats
+	//VLAN        uint16
 }
 
 func natmap(tuples map[[2]IP4]bool, previous map[[2]IP4]uint16) (mapping map[[2]IP4]uint16) {

@@ -81,10 +81,10 @@ func (s *ICMPs) probe(socket net.PacketConn) {
 
 	defer socket.Close()
 
-	for target := range s.submit {
-		go func() {
-			socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
+	for t := range s.submit {
+		socket.SetWriteDeadline(time.Now().Add(time.Second))
+		go func(target string) {
 			socket.WriteTo(s.echoRequest(), &net.IPAddr{IP: net.ParseIP(target)})
-		}()
+		}(t)
 	}
 }

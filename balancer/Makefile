@@ -16,7 +16,7 @@ export CGO_CFLAGS  = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF)
 
 build: libbpf/src/libbpf.a
-	go build
+	go build -race
 
 libbpf:
 	git clone -b $(BPFVER) https://github.com/libbpf/libbpf

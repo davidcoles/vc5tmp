@@ -93,7 +93,20 @@ func main() {
 		}()
 	}
 
-	sleep(60)
+	sleep(10)
+
+	ss, _ := client.Services()
+
+	for _, s := range ss {
+
+		log.Println(s)
+
+		ds, _ := client.Destinations(svc)
+
+		for _, d := range ds {
+			log.Println(d)
+		}
+	}
 }
 
 func sleep(t time.Duration) {

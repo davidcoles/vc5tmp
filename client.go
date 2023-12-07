@@ -310,9 +310,19 @@ func (b *Client) Services() ([]ServiceExtended, error) {
 
 	var services []ServiceExtended
 
-	for k, v := range b.service {
+	for svc, service := range b.service {
 		var se ServiceExtended
-		se.Service = v.Service(k)
+		se.Service = service.Service(svc)
+
+		for rip, _ := range service.backend {
+			v := bpf_vrpp{vip: svc.IP, rip: rip, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
+			c := bpf_counter{}
+			b.maps.lookup_vrpp_counter(&v, &c)
+			se.Stats.Packets += c.packets
+			se.Stats.Octets += c.octets
+			se.Stats.Flows += c.flows
+		}
+
 		services = append(services, se)
 	}
 
@@ -460,9 +470,10 @@ func (b *Client) Destinations(s Service) ([]DestinationExtended, error) {
 		v := bpf_vrpp{vip: vip, rip: rip, port: port, protocol: protocol}
 		c := bpf_counter{}
 		b.maps.lookup_vrpp_counter(&v, &c)
-		de.Packets = c.packets
-		de.Octets = c.octets
-		de.Flows = c.flows
+		de.Stats.Packets = c.packets
+		de.Stats.Octets = c.octets
+		de.Stats.Flows = c.flows
+		de.MAC = b.hwaddr[rip]
 		destinations = append(destinations, de)
 	}
 
