@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"sort"
 	"sync"
 	"syscall"
@@ -628,7 +629,7 @@ func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error)
 	m.m = make(map[string]int)
 	m.defcon = 5
 
-	x, err := xdp.LoadBpfProgram(BPF_O)
+	x, err := xdp.LoadBpfProgram(_BPF_O)
 	m.x = x
 
 	if err != nil {
@@ -881,6 +882,16 @@ func (b *Client) NATAddr(vip, rip IP4) (r IP4, _ bool) {
 	}
 
 	return b.natAddr(i), true
+}
+
+func (b *Client) NATAddress(vip, rip netip.Addr) (r netip.Addr, _ bool) {
+	if !vip.Is4() || !rip.Is4() {
+		return r, false
+	}
+
+	ip, ok := b.NATAddr(vip.As4(), rip.As4())
+
+	return netip.AddrFrom4(ip), ok
 }
 
 func (b *Client) natAddr(i uint16) IP4 {

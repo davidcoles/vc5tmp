@@ -60,6 +60,8 @@ type Destination struct {
 	Port    uint16
 }
 
+type scheme bool
+
 const (
 	GET  method = false
 	HEAD method = true
@@ -78,6 +80,7 @@ type state struct {
 	mutex  sync.Mutex
 	checks chan Checks
 	status status
+	init   bool
 }
 
 type status = Status
@@ -126,7 +129,9 @@ func (m *Mon) Dump() map[Instance]Status {
 
 	for k, v := range m.services {
 		v.mutex.Lock()
-		r[k] = v.status
+		if v.init {
+			r[k] = v.status
+		}
 		v.mutex.Unlock()
 	}
 
@@ -150,8 +155,7 @@ func (m *Mon) Update(checks map[Instance]Checks) {
 	}
 
 	for instance, c := range checks {
-		now := time.Now()
-		state := &state{status: status{OK: false, Diagnostic: "Initialising ...", Last: now, When: now}}
+		state := &state{status: status{Diagnostic: "Initialising ..."}}
 		state.checks = m.monitor(instance.Service.Address, instance.Destination.Address, instance.Destination.Port, state, c)
 		m.services[instance] = state
 	}
@@ -180,16 +184,18 @@ func (m *Mon) monitor(vip, rip netip.Addr, port uint16, state *state, c Checks) 
 			var ok bool
 			state.mutex.Lock()
 			was := state.status
+			init := state.init
 			state.mutex.Unlock()
 
 			now := was
 
 			t := time.Now()
+
 			now.OK, now.Diagnostic = m.prober.Probe(vip, rip, port, c)
 			now.Last = t
 			now.Time = time.Now().Sub(t)
 
-			if was.OK != now.OK {
+			if !init || was.OK != now.OK {
 				now.When = t
 				select {
 				case m.C <- true:
@@ -199,11 +205,11 @@ func (m *Mon) monitor(vip, rip netip.Addr, port uint16, state *state, c Checks) 
 
 			state.mutex.Lock()
 			state.status = now
+			state.init = true
 			state.mutex.Unlock()
 
 			select {
 			case <-ticker.C:
-
 			case c, ok = <-C:
 				if !ok {
 					return
@@ -230,8 +236,8 @@ type Check struct {
 	// Path of resource to use when building a URI for HTTP/HTTPS healthchecks
 	Path string `json:"path,omitempty"`
 
-	// Expected HTTP status code to allow check to succeed
-	Expect uint16 `json:"expect,omitempty"`
+	// Expected HTTP status codes to allow check to succeed
+	Expect []int `json:"expect,omitempty"`
 
 	// Method - HTTP: GET=false, HEAD=true DNS: UDP=false TCP=true
 	Method bool `json:"method,omitempty"`
@@ -255,15 +261,22 @@ func (m *Mon) Probe(addr netip.Addr, port uint16, checks Checks) (bool, string) 
 	for _, c := range checks {
 		var ok bool
 		var s string
+
+		p := port
+
+		if c.Port != 0 {
+			p = c.Port
+		}
+
 		switch c.Type {
 		case "http":
-			ok, s = m.HTTP(addr, port, c)
+			ok, s = m.HTTP(addr, port, false, c.Method, c.Host, c.Path, c.Expect...)
 		case "https":
-			ok, s = m.HTTP(addr, port, c)
+			ok, s = m.HTTP(addr, port, true, c.Method, c.Host, c.Path, c.Expect...)
 		case "syn":
-			ok, s = m.SYN(addr, port, c)
+			ok, s = m.SYN(addr, p)
 		case "dns":
-			ok, s = m.DNS(addr, port, c)
+			ok, s = m.DNS(addr, p, c.Method)
 		default:
 			s = "Unknown check type"
 		}
@@ -276,20 +289,16 @@ func (m *Mon) Probe(addr netip.Addr, port uint16, checks Checks) (bool, string) 
 	return true, "OK"
 }
 
-func (m *Mon) DNS(addr netip.Addr, port uint16, check Check) (bool, string) {
+func (m *Mon) DNS(addr netip.Addr, port uint16, useTCP bool) (bool, string) {
 
-	if check.Port != 0 {
-		port = check.Port
+	if useTCP {
+		return dnstcp(addr.String(), port)
 	}
 
-	if check.Method == TCP {
-		return DNSTCP(addr.String(), port)
-	}
-
-	return DNSUDP(addr.String(), port)
+	return dnsudp(addr.String(), port)
 }
 
-func (m *Mon) SYN(addr netip.Addr, port uint16, check Check) (bool, string) {
+func (m *Mon) SYN(addr netip.Addr, port uint16) (bool, string) {
 
 	if !addr.Is4() {
 		return false, "Not an IPv4 address"
@@ -297,46 +306,41 @@ func (m *Mon) SYN(addr netip.Addr, port uint16, check Check) (bool, string) {
 
 	ip := addr.As4()
 
-	if check.Port != 0 {
-		port = check.Port
-	}
-
 	return m.syn.Check(ip, port)
 }
 
-func (m *Mon) HTTP(addr netip.Addr, port uint16, check Check) (bool, string) {
-
-	if check.Port != 0 {
-		port = check.Port
-	}
+func (m *Mon) HTTP(addr netip.Addr, port uint16, https bool, head bool, host, path string, expect ...int) (bool, string) {
+	defer client.CloseIdleConnections()
 
 	if port == 0 {
 		return false, "Port is 0"
 	}
 
+	scheme := "http"
 	method := "GET"
 
-	if check.Method == HEAD {
-		method = "HEAD"
+	if https {
+		scheme = "https"
 	}
 
-	defer client.CloseIdleConnections()
-
-	path := check.Path
+	if head {
+		method = "HEAD"
+	}
 
 	if len(path) > 0 && path[0] == '/' {
 		path = path[1:]
 	}
 
-	url := fmt.Sprintf("%s://%s:%d/%s", check.Type, addr.String(), port, path)
+	url := fmt.Sprintf("%s://%s:%d/%s", scheme, addr, port, path)
+	fmt.Println(url)
 	req, err := http.NewRequest(method, url, nil)
 
 	if err != nil {
 		return false, err.Error()
 	}
 
-	if check.Host != "" {
-		req.Host = check.Host
+	if host != "" {
+		req.Host = host
 	}
 
 	resp, err := client.Do(req)
@@ -349,11 +353,36 @@ func (m *Mon) HTTP(addr netip.Addr, port uint16, check Check) (bool, string) {
 
 	ioutil.ReadAll(resp.Body)
 
-	exp := int(check.Expect)
-
-	if exp == 0 {
-		exp = 200
+	if len(expect) == 0 {
+		return resp.StatusCode == 200, resp.Status
 	}
 
-	return resp.StatusCode == exp, resp.Status
+	for _, e := range expect {
+		if resp.StatusCode == e {
+			return true, resp.Status
+		}
+	}
+	return false, resp.Status
 }
+
+// unlikely, but may need to override for SNI in case remote server selects handler based on TLS values?
+// something like: https://github.com/golang/go/issues/22704
+/*
+dialer = &net.Dialer{
+	Timeout:   30 * time.Second,
+	KeepAlive: 30 * time.Second,
+	DualStack: true,
+}
+
+client := http.Client{
+	Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			// redirect all connections to 127.0.0.1
+			addr = "127.0.0.1" + addr[strings.LastIndex(addr, ":"):]
+			return dialer.DialContext(ctx, network, addr)
+		},
+	},
+}
+*/
+
+// create a new client each time, with right IP?

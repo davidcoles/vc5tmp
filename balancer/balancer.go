@@ -30,7 +30,7 @@ func main() {
 	asn := flag.Int("asn", 65000, "Local Autonomous System Number")
 	port := flag.Int("port", 80, "Port to run service on")
 	udp := flag.Bool("udp", false, "Use UDP instead of TCP")
-	mon := flag.Bool("mon", false, "Tets monitoring code")
+	mon := flag.Bool("mon", false, "Test monitoring code")
 
 	protocol := vc5tmp.TCP
 
@@ -47,8 +47,6 @@ func main() {
 		monitor(args[0], args[1:])
 		return
 	}
-
-	panic("nope")
 
 	if *port < 1 || *port > 65535 {
 		log.Fatal("Port not in range 1-65535")
@@ -88,9 +86,15 @@ func main() {
 
 	defer client.RemoveService(svc)
 
+	conf := map[mon.Instance]mon.Checks{}
+
 	for _, r := range rip {
 		dst := vc5tmp.Destination{Address: netip.MustParseAddr(r), Weight: 0}
 		client.CreateDestination(svc, dst)
+
+		ms := mon.Service{Address: svc.Address, Port: svc.Port, Protocol: uint8(svc.Protocol)}
+		md := mon.Destination{Address: dst.Address, Port: svc.Port}
+		conf[mon.Instance{Service: ms, Destination: md}] = []mon.Check{mon.Check{Type: "http", Path: "/alive"}}
 	}
 
 	if *peer != "" {
@@ -133,7 +137,7 @@ func sleep(t time.Duration) {
 
 func monitor(addr string, args []string) {
 
-	check1 := mon.Check{Type: "http", Port: 80, Path: "/alive"}
+	check1 := mon.Check{Type: "http", Port: 80, Path: "/alive", Expect: nil}
 	check2 := mon.Check{Type: "syn", Port: 80}
 	check3 := mon.Check{Type: "dns", Port: 53, Method: mon.UDP}
 

@@ -37,7 +37,11 @@ import (
 )
 
 //go:embed bpf/bpf.o
-var BPF_O []byte
+var _BPF_O []byte
+
+func BPF() []byte {
+	return append([]byte{}, _BPF_O...)
+}
 
 type IP4 [4]byte
 type MAC [6]byte

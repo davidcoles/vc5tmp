@@ -33,7 +33,7 @@ func init() {
 
 // dig chaos txt version.bind @80.80.80.80
 
-func DNSUDP(addr string, port uint16) (bool, string) {
+func dnsudp(addr string, port uint16) (bool, string) {
 
 	if port == 0 {
 		return false, "Port is 0"
@@ -88,7 +88,7 @@ func DNSUDP(addr string, port uint16) (bool, string) {
 	return true, ""
 }
 
-func DNSTCP(addr string, port uint16) (bool, string) {
+func dnstcp(addr string, port uint16) (bool, string) {
 
 	if port == 0 {
 		return false, "Port is 0"
