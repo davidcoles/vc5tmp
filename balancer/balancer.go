@@ -8,6 +8,7 @@ import (
 
 	"github.com/davidcoles/vc5tmp"
 	"github.com/davidcoles/vc5tmp/bgp"
+	"github.com/davidcoles/vc5tmp/mon"
 )
 
 type strings []string
@@ -29,6 +30,7 @@ func main() {
 	asn := flag.Int("asn", 65000, "Local Autonomous System Number")
 	port := flag.Int("port", 80, "Port to run service on")
 	udp := flag.Bool("udp", false, "Use UDP instead of TCP")
+	mon := flag.Bool("mon", false, "Tets monitoring code")
 
 	protocol := vc5tmp.TCP
 
@@ -39,11 +41,18 @@ func main() {
 	flag.Var(&extra, "e", "extra interfaces")
 	flag.Parse()
 
+	args := flag.Args()
+
+	if *mon {
+		monitor(args[0], args[1:])
+		return
+	}
+
+	panic("nope")
+
 	if *port < 1 || *port > 65535 {
 		log.Fatal("Port not in range 1-65535")
 	}
-
-	args := flag.Args()
 
 	file := args[0]
 	addr := netip.MustParseAddr(args[1])
@@ -120,4 +129,65 @@ func main() {
 
 func sleep(t time.Duration) {
 	time.Sleep(t * time.Second)
+}
+
+func monitor(addr string, args []string) {
+
+	check1 := mon.Check{Type: "http", Port: 80, Path: "/alive"}
+	check2 := mon.Check{Type: "syn", Port: 80}
+	check3 := mon.Check{Type: "dns", Port: 53, Method: mon.UDP}
+
+	vip := netip.MustParseAddr(args[0])
+	svc := mon.Service{Address: vip, Port: 80, Protocol: 6}
+	conf1 := map[mon.Instance]mon.Checks{}
+	conf2 := map[mon.Instance]mon.Checks{}
+
+	for n, r := range args[1:] {
+
+		rip := netip.MustParseAddr(r)
+		dst := mon.Destination{Address: rip, Port: 80}
+		inst := mon.Instance{Service: svc, Destination: dst}
+
+		if n < len(args[1:])-1 {
+			conf1[inst] = []mon.Check{check1}
+		}
+
+		if n > 0 {
+			conf2[inst] = []mon.Check{check2, check3}
+		}
+	}
+
+	ip := netip.MustParseAddr(addr)
+	//ip := netip.MustParseAddr("fe80::250:56ff:fe90:7c3f")
+
+	monitor, err := mon.New(ip, conf1)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer monitor.Stop()
+
+	watch(monitor, 20*time.Second)
+
+	monitor.Update(conf2)
+
+	watch(monitor, 20*time.Second)
+}
+
+func watch(monitor *mon.Mon, t time.Duration) {
+	timer := time.NewTimer(t)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-timer.C:
+			return
+		case <-monitor.C:
+			log.Println("Something changed")
+			for instance, status := range monitor.Dump() {
+				log.Println(instance, status)
+			}
+		}
+	}
 }
