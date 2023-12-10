@@ -332,7 +332,6 @@ func (m *Mon) HTTP(addr netip.Addr, port uint16, https bool, head bool, host, pa
 	}
 
 	url := fmt.Sprintf("%s://%s:%d/%s", scheme, addr, port, path)
-	fmt.Println(url)
 	req, err := http.NewRequest(method, url, nil)
 
 	if err != nil {
