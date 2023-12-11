@@ -356,27 +356,34 @@ func (b *Client) CreateService(s Service) error {
 	return nil
 }
 
-func (b *Client) UpdateService(s Service) error {
+func (b *Client) Service(s Service) (se ServiceExtended, e error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
 	svc, err := s.svc()
 
 	if err != nil {
-		return err
+		return se, err
 	}
 
 	service, ok := b.service[svc]
 
 	if !ok {
-		return errors.New("Service does not exist")
+		return se, errors.New("Service does not exist")
 	}
 
-	service.update(s)
+	se.Service = service.Service(svc)
 
-	b.update_service(svc, service, b.hwaddr, false)
+	for rip, _ := range service.backend {
+		v := bpf_vrpp{vip: svc.IP, rip: rip, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
+		c := bpf_counter{}
+		b.maps.lookup_vrpp_counter(&v, &c)
+		se.Stats.Packets += c.packets
+		se.Stats.Octets += c.octets
+		se.Stats.Flows += c.flows
+	}
 
-	return nil
+	return se, nil
 }
 
 func (b *Client) RemoveService(s Service) error {
