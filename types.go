@@ -75,7 +75,7 @@ type protocol uint8
 type svc struct {
 	IP       IP4
 	Port     uint16
-	Protocol protocol
+	Protocol uint8
 }
 
 type nat_map map[[2]IP4]uint16
@@ -243,7 +243,7 @@ func (s *Service) svc() (svc, error) {
 		panic("Oops")
 	}
 	ip := s.Address.As4()
-	return svc{IP: ip, Port: s.Port, Protocol: s.Protocol}, nil
+	return svc{IP: ip, Port: s.Port, Protocol: uint8(s.Protocol)}, nil
 }
 
 type Destination struct {
