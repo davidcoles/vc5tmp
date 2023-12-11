@@ -80,16 +80,16 @@ type state struct {
 	mutex  sync.Mutex
 	checks chan Checks
 	status status
-	init   bool
 }
 
 type status = Status
 type Status struct {
-	OK         bool
-	Diagnostic string
-	Time       time.Duration
-	Last       time.Time
-	When       time.Time
+	OK          bool
+	Diagnostic  string
+	Time        time.Duration
+	Last        time.Time
+	When        time.Time
+	Initialised bool
 }
 
 type Mon struct {
@@ -138,9 +138,7 @@ func (m *Mon) Dump() map[Instance]Status {
 
 	for k, v := range m.services {
 		v.mutex.Lock()
-		if v.init {
-			r[k] = v.status
-		}
+		r[k] = v.status
 		v.mutex.Unlock()
 	}
 
@@ -193,7 +191,6 @@ func (m *Mon) monitor(vip, rip netip.Addr, port uint16, state *state, c Checks) 
 			var ok bool
 			state.mutex.Lock()
 			was := state.status
-			init := state.init
 			state.mutex.Unlock()
 
 			now := was
@@ -203,8 +200,9 @@ func (m *Mon) monitor(vip, rip netip.Addr, port uint16, state *state, c Checks) 
 			now.OK, now.Diagnostic = m.prober.Probe(vip, rip, port, c)
 			now.Last = t
 			now.Time = time.Now().Sub(t)
+			now.Initialised = true
 
-			if !init || was.OK != now.OK {
+			if !was.Initialised || was.OK != now.OK {
 				now.When = t
 				select {
 				case m.C <- true:
@@ -214,7 +212,6 @@ func (m *Mon) monitor(vip, rip netip.Addr, port uint16, state *state, c Checks) 
 
 			state.mutex.Lock()
 			state.status = now
-			state.init = true
 			state.mutex.Unlock()
 
 			select {
