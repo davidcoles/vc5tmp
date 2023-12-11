@@ -30,7 +30,7 @@ func main() {
 	asn := flag.Int("asn", 65000, "Local Autonomous System Number")
 	port := flag.Int("port", 80, "Port to run service on")
 	udp := flag.Bool("udp", false, "Use UDP instead of TCP")
-	mon := flag.Bool("mon", false, "Test monitoring code")
+	monit := flag.Bool("mon", false, "Test monitoring code")
 
 	protocol := vc5tmp.TCP
 
@@ -43,7 +43,7 @@ func main() {
 
 	args := flag.Args()
 
-	if *mon {
+	if *monit {
 		monitor(args[0], args[1:])
 		return
 	}

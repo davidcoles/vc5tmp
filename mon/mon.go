@@ -123,6 +123,15 @@ func Custom(addr netip.Addr, services Services, p Prober, resets bool) (*Mon, er
 	return m, nil
 }
 
+func (m *Mon) Status(svc Service, dst Destination) (Status, bool) {
+	s, ok := m.services[Instance{Service: svc, Destination: dst}]
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.status, ok
+}
+
 func (m *Mon) Dump() map[Instance]Status {
 
 	r := map[Instance]Status{}
