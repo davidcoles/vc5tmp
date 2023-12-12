@@ -166,7 +166,7 @@ func (t tag_map) ent(ip IP4) (uint16, bool) {
 
 type vc struct {
 	vid uint16
-	net prefix
+	net net.IPNet
 }
 
 func (c *Client) targets() (r []IP4) {

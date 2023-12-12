@@ -68,7 +68,7 @@ type Client struct {
 
 	tag_map tag_map
 	nat_map nat_map
-	vlans   map[uint16]prefix // only get updated by config change
+	vlans   map[uint16]net.IPNet // only get updated by config change
 }
 
 func (b *Client) arp() map[IP4]MAC {
@@ -76,7 +76,7 @@ func (b *Client) arp() map[IP4]MAC {
 }
 
 func (b *Client) Start(address string, nic string, phy ...string) error {
-	b.vlans = map[uint16]prefix{}
+	b.vlans = map[uint16]net.IPNet{}
 	b.nat_map = map[[2]IP4]uint16{}
 	b.tag_map = map[IP4]uint16{}
 	b.service = map[svc]*Service{}
@@ -872,7 +872,7 @@ func (b *Client) nat_entries(nat_map nat_map, tag_map tag_map, arp map[IP4]MAC) 
 	return
 }
 
-func (b *Client) VLANs(vlans map[uint16]prefix) {
+func (b *Client) VLANs(vlans map[uint16]net.IPNet) {
 	b.vlans = vlans
 }
 
@@ -966,7 +966,7 @@ func (b *Client) _natEntry(vip, rip, nat IP4, realhw MAC, vlanid uint16, idx ifa
 	return
 }
 
-func VlanInterfaces(in map[uint16]prefix) map[uint16]iface {
+func VlanInterfaces(in map[uint16]net.IPNet) map[uint16]iface {
 	out := map[uint16]iface{}
 
 	for vid, pref := range in {
@@ -978,7 +978,7 @@ func VlanInterfaces(in map[uint16]prefix) map[uint16]iface {
 	return out
 }
 
-func VlanInterface(prefix prefix) (ret iface, _ bool) {
+func VlanInterface(prefix net.IPNet) (ret iface, _ bool) {
 	ifaces, err := net.Interfaces()
 
 	if err != nil {
@@ -1063,7 +1063,7 @@ func (p *prefix) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func Load(file string) (map[uint16]prefix, error) {
+func Load(file string) (map[uint16]net.IPNet, error) {
 
 	f, err := os.Open(file)
 
@@ -1087,5 +1087,11 @@ func Load(file string) (map[uint16]prefix, error) {
 		return nil, err
 	}
 
-	return foo, nil
+	bar := map[uint16]net.IPNet{}
+
+	for k, v := range foo {
+		bar[k] = net.IPNet(v)
+	}
+
+	return bar, nil
 }
