@@ -1027,7 +1027,8 @@ func VlanInterface(prefix prefix) (ret iface, _ bool) {
 	return
 }
 
-type prefix net.IPNet
+type prefix = Prefix
+type Prefix net.IPNet
 
 func (p *prefix) String() string {
 	return (*net.IPNet)(p).String()
