@@ -53,6 +53,8 @@ type be_state struct {
 }
 
 type Client struct {
+	Interfaces []string
+
 	mutex sync.Mutex
 
 	service map[svc]*Service
@@ -75,7 +77,11 @@ func (b *Client) arp() map[IP4]MAC {
 	return arp()
 }
 
-func (b *Client) Start(address string, nic string, phy ...string) error {
+// func (b *Client) Start(address string, nic string, phy ...string) error {
+func (b *Client) Start(address string, nic string) error {
+
+	phy := b.Interfaces
+
 	b.vlans = map[uint16]net.IPNet{}
 	b.nat_map = map[[2]IP4]uint16{}
 	b.tag_map = map[IP4]uint16{}
@@ -302,6 +308,12 @@ func (b *Client) update_nat_map() {
 }
 
 /********************************************************************************/
+
+func (b *Client) VLANs(vlans map[uint16]net.IPNet) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.vlans = vlans
+}
 
 func (b *Client) Services() ([]ServiceExtended, error) {
 	b.mutex.Lock()
@@ -870,10 +882,6 @@ func (b *Client) nat_entries(nat_map nat_map, tag_map tag_map, arp map[IP4]MAC) 
 	}
 
 	return
-}
-
-func (b *Client) VLANs(vlans map[uint16]net.IPNet) {
-	b.vlans = vlans
 }
 
 type natkeyval struct {

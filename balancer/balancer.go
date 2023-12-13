@@ -61,9 +61,11 @@ func main() {
 
 	links := append([]string{link}, extra...)
 
-	client := &vc5tmp.Client{}
+	client := &vc5tmp.Client{
+		Interfaces: links,
+	}
 
-	err := client.Start(addr.String(), "", links...)
+	err := client.Start(addr.String(), "")
 
 	if err != nil {
 		log.Fatal(err)
