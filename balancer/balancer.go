@@ -65,7 +65,7 @@ func main() {
 		Interfaces: links,
 	}
 
-	err := client.Start(addr.String(), "")
+	err := client.Start(addr, "")
 
 	if err != nil {
 		log.Fatal(err)

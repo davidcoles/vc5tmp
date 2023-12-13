@@ -78,7 +78,13 @@ func (b *Client) arp() map[IP4]MAC {
 }
 
 // func (b *Client) Start(address string, nic string, phy ...string) error {
-func (b *Client) Start(address string, nic string) error {
+func (b *Client) Start(addr netip.Addr, nic string) error {
+
+	if !addr.Is4() {
+		return errors.New("Not an IPv4 address: " + addr.String())
+	}
+
+	//address := addr.String()
 
 	phy := b.Interfaces
 
@@ -90,11 +96,11 @@ func (b *Client) Start(address string, nic string) error {
 
 	b.update = make(chan bool, 1)
 
-	ip := net.ParseIP(address).To4()
+	ip := addr.As4()
 
-	if ip == nil || len(ip) != 4 {
-		return errors.New("Invalid IP address: " + address)
-	}
+	//if ip == nil || len(ip) != 4 {
+	//	return errors.New("Invalid IP address: " + address)
+	//}
 
 	if nic == "" {
 		nic = phy[0]
