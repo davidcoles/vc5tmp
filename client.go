@@ -73,6 +73,14 @@ type Client struct {
 	vlans   map[uint16]net.IPNet // only get updated by config change
 }
 
+func (b *Client) Namespace() string {
+	return NAMESPACE
+}
+
+func (b *Client) NamespaceAddress() string {
+	return IP.String()
+}
+
 func (b *Client) arp() map[IP4]MAC {
 	return arp()
 }
