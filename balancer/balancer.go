@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5tmp"
-	//"github.com/davidcoles/vc5tmp/bgp"
-	//"github.com/davidcoles/vc5tmp/mon"
 )
 
 type strings []string
@@ -109,7 +107,7 @@ func main() {
 		client.CreateDestination(svc, dst)
 	}
 
-	sleep(10)
+	sleep(60)
 
 	ss, _ := client.Services()
 
@@ -123,9 +121,6 @@ func main() {
 			log.Println(d)
 		}
 	}
-
-	sleep(60)
-
 }
 
 func sleep(t time.Duration) {

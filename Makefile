@@ -53,5 +53,5 @@ ubuntu-dependencies:
 	ln -s /usr/lib/go-1.20/bin/go /usr/local/bin/go
 
 wc:
-	wc *.go xdp/*.go maglev/*.go bpf/*.go bgp/*.go
+	wc *.go xdp/*.go maglev/*.go bpf/*.go
 	wc xdp/*.h xdp/*.c bpf/*.c bpf/*.h
