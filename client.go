@@ -54,12 +54,16 @@ type be_state struct {
 
 type Client struct {
 	Interfaces []string
+	VLANs      map[uint16]net.IPNet
+	NAT        bool
+	Native     bool
+	MultiNIC   bool
 
 	mutex sync.Mutex
 
 	service map[svc]*Service
 
-	netns netns
+	netns *netns
 	maps  *maps
 	icmp  *ICMPs
 	nat   []natkeyval
@@ -101,14 +105,13 @@ func (b *Client) Start(addr netip.Addr, nic string) error {
 	b.tag_map = map[IP4]uint16{}
 	b.service = map[svc]*Service{}
 	b.hwaddr = map[IP4]MAC{}
-
 	b.update = make(chan bool, 1)
 
-	ip := addr.As4()
+	if b.VLANs != nil {
+		b.vlans = b.VLANs
+	}
 
-	//if ip == nil || len(ip) != 4 {
-	//	return errors.New("Invalid IP address: " + address)
-	//}
+	ip := addr.As4()
 
 	if nic == "" {
 		nic = phy[0]
@@ -119,24 +122,35 @@ func (b *Client) Start(addr netip.Addr, nic string) error {
 		return err
 	}
 
-	err = b.netns.Init(IP4{ip[0], ip[1], ip[2], ip[3]}, iface)
+	var vetha, vethb string
+
+	if b.NAT {
+		b.netns = &netns{}
+
+		err = b.netns.Init(IP4{ip[0], ip[1], ip[2], ip[3]}, iface)
+
+		if err != nil {
+			return err
+		}
+
+		vetha = b.netns.IfA
+		vethb = b.netns.IfB
+
+		fmt.Println(b.netns)
+	}
+
+	b.maps, err = open(b.Native, b.MultiNIC, vetha, vethb, phy...)
 
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(b.netns)
+	if b.netns != nil {
+		err = b.netns.Open()
 
-	b.maps, err = open(false, true, b.netns.IfA, b.netns.IfB, phy...)
-
-	if err != nil {
-		return err
-	}
-
-	err = b.netns.Open()
-
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
 	}
 
 	b.icmp = ICMP()
@@ -185,7 +199,7 @@ func (b *Client) background() {
 			b.update_arp()
 
 		case <-b.update:
-			b.update_nat()
+			b.update_nat_and_redirects()
 			b.update_services()
 		}
 	}
@@ -235,25 +249,43 @@ func (b *Client) update_arp() {
 	}
 }
 
-func (b *Client) update_nat() {
+func (b *Client) update_nat_and_redirects() {
 
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
+	// Could probably move it out into another function and only scan interfaces periodically
+	ifaces := VlanInterfaces(b.vlans)
+	for vid, iface := range ifaces {
+		b.maps.update_redirect(vid, iface.mac, iface.idx)
+	}
+
+	//ifaces := VlanInterfaces(b.vlans)
+	//for vid, iface := range ifaces {
+	//	b.maps.update_redirect(vid, iface.mac, iface.idx)
+	//}
+
+	//// need to check if this would be ok
+	//if b.netns == nil {
+	//	return
+	//}
+
+	var nat []natkeyval
+
 	nat_map := b.nat_map.get()
 	tag_map := b.tag_map.get()
 
-	old := map[bpf_natkey]bpf_natval{}
-
-	for _, e := range b.nat {
-		old[e.key] = e.val
+	if b.netns != nil {
+		nat = b.nat_entries(ifaces, nat_map, tag_map, b.hwaddr)
 	}
 
 	var changed bool
-
-	nat := b.nat_entries(nat_map, tag_map, b.hwaddr)
-
 	var updated, deleted int
+
+	old := map[bpf_natkey]bpf_natval{}
+	for _, e := range b.nat {
+		old[e.key] = e.val
+	}
 
 	// apply all entries
 	for _, e := range nat {
@@ -323,7 +355,7 @@ func (b *Client) update_nat_map() {
 
 /********************************************************************************/
 
-func (b *Client) VLANs(vlans map[uint16]net.IPNet) {
+func (b *Client) UpdateVLANs(vlans map[uint16]net.IPNet) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	b.vlans = vlans
@@ -864,12 +896,18 @@ func (b *Client) ifaces() map[uint16]iface {
 	return VlanInterfaces(b.vlans)
 }
 
-func (b *Client) nat_entries(nat_map nat_map, tag_map tag_map, arp map[IP4]MAC) (nkv []natkeyval) {
+func (b *Client) nat_entries(ifaces map[uint16]iface, nat_map nat_map, tag_map tag_map, arp map[IP4]MAC) (nkv []natkeyval) {
 
-	ifaces := VlanInterfaces(b.vlans)
+	/*
+		ifaces := VlanInterfaces(b.vlans)
 
-	for vid, iface := range ifaces {
-		b.maps.update_redirect(vid, iface.mac, iface.idx)
+		for vid, iface := range ifaces {
+			b.maps.update_redirect(vid, iface.mac, iface.idx)
+		}
+	*/
+
+	if b.netns == nil {
+		return
 	}
 
 	for k, v := range nat_map {

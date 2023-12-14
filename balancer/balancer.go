@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/netip"
 	"time"
 
@@ -39,8 +40,15 @@ First argument needs to be a file which contains something like:
 
 func main() {
 
-	port := flag.Int("port", 80, "Port to run service on")
-	udp := flag.Bool("udp", false, "Use UDP instead of TCP")
+	file := flag.String("v", "", "JSON file to read VLAN info from")
+	port := flag.Int("p", 80, "Port to run service on")
+	udp := flag.Bool("u", false, "Use UDP instead of TCP")
+	multi := flag.Bool("m", false, "Multi NIC mode")
+	nat := flag.Bool("n", false, "NAT (creates a network namespace and interfaces)")
+	flag.Var(&extra, "i", "extra interfaces")
+	flag.Parse()
+
+	args := flag.Args()
 
 	protocol := vc5tmp.TCP
 
@@ -48,43 +56,44 @@ func main() {
 		protocol = vc5tmp.UDP
 	}
 
-	flag.Var(&extra, "e", "extra interfaces")
-	flag.Parse()
-
-	args := flag.Args()
-
 	if *port < 1 || *port > 65535 {
 		log.Fatal("Port not in range 1-65535")
 	}
 
-	file := args[0]
-	link := args[1]
-	addr := netip.MustParseAddr(args[2])
+	link := args[0]
+	addr := netip.MustParseAddr(args[1])
 
-	vip := netip.MustParseAddr(args[3])
-	rip := args[4:]
+	vip := netip.MustParseAddr(args[2])
+	rip := args[3:]
 
 	links := append([]string{link}, extra...)
 
-	client := &vc5tmp.Client{
-		Interfaces: links,
+	var vlans map[uint16]net.IPNet
+
+	var err error
+
+	if *file != "" {
+		vlans, err = vc5tmp.Load(*file)
+
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
-	err := client.Start(addr, "")
+	client := &vc5tmp.Client{
+		Interfaces: links,
+		VLANs:      vlans,
+		NAT:        *nat,
+		MultiNIC:   *multi,
+	}
+
+	err = client.Start(addr, "")
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	vlans, err := vc5tmp.Load(file)
-
-	if err != nil {
-		log.Fatal(err, vlans)
-	}
-
 	fmt.Println(vlans)
-
-	client.VLANs(vlans)
 
 	svc := vc5tmp.Service{Address: vip, Port: uint16(*port), Protocol: protocol}
 	err = client.CreateService(svc)
@@ -96,17 +105,8 @@ func main() {
 	defer client.RemoveService(svc)
 
 	for _, r := range rip {
-		dst := vc5tmp.Destination{Address: netip.MustParseAddr(r), Weight: 0}
+		dst := vc5tmp.Destination{Address: netip.MustParseAddr(r), Weight: 1}
 		client.CreateDestination(svc, dst)
-	}
-
-	sleep(10)
-
-	ds, _ := client.Destinations(svc)
-	for _, d := range ds {
-		d.Destination.Weight = 1
-		client.UpdateDestination(svc, d.Destination)
-		sleep(5)
 	}
 
 	sleep(10)
