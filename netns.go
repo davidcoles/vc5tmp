@@ -52,8 +52,8 @@ func (n *netns) Init(ip IP4, out *net.Interface) error {
 	copy(n.phys.mac[:], out.HardwareAddr[:])
 
 	n.NS = NAMESPACE
-	n.IfA = "vc5a"
-	n.IfB = "vc5b"
+	n.IfA = NAMESPACE
+	n.IfB = NAMESPACE + "ns"
 
 	n.IpA = [4]byte{IP[0], IP[1], 255, 253}
 	n.IpB = [4]byte{IP[0], IP[1], 255, 254}
