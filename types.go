@@ -53,6 +53,14 @@ func (m MAC) String() string {
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
 }
 
+func (m *MAC) string() string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
+}
+
+func (m *MAC) MarshalText() ([]byte, error) {
+	return []byte(m.string()), nil
+}
+
 func (m *MAC) IsNil() bool {
 	return m[0] == 0 && m[1] == 0 && m[2] == 0 && m[3] == 0 && m[4] == 0 && m[5] == 0
 }
