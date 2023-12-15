@@ -19,7 +19,6 @@
 package vc5tmp
 
 import (
-	"log"
 	"net"
 	"os/exec"
 )
@@ -58,7 +57,12 @@ func (n *netns) Init(ip IP4, out *net.Interface) error {
 	n.IpA = [4]byte{IP[0], IP[1], 255, 253}
 	n.IpB = [4]byte{IP[0], IP[1], 255, 254}
 
-	setup1(n.IfA, n.IfB)
+	clean(n.IfA, n.NS)
+
+	err := setup1(n.IfA, n.IfB)
+	if err != nil {
+		return err
+	}
 
 	iface, err := net.InterfaceByName(n.IfA)
 	if err != nil {
@@ -78,8 +82,7 @@ func (n *netns) Init(ip IP4, out *net.Interface) error {
 }
 
 func (n *netns) Open() error {
-	setup2(n.NS, n.IfA, n.IfB, n.IpA, n.IpB)
-	return nil
+	return setup2(n.NS, n.IfA, n.IfB, n.IpA, n.IpB)
 }
 
 func (n *netns) Close() { clean(n.IfA, n.NS) }
@@ -87,25 +90,23 @@ func (n *netns) Close() { clean(n.IfA, n.NS) }
 /**********************************************************************/
 
 func clean(if1, ns string) {
-	script1 := `
+	script := `
     ip link del ` + if1 + ` >/dev/null 2>&1 || true
     ip netns del ` + ns + ` >/dev/null 2>&1 || true
 `
-	exec.Command("/bin/sh", "-e", "-c", script1).Output()
+	exec.Command("/bin/sh", "-e", "-c", script).Output()
 }
 
-func setup1(if1, if2 string) {
-	script1 := `
+func setup1(if1, if2 string) error {
+	script := `
 ip link del ` + if1 + ` >/dev/null 2>&1 || true
 ip link add ` + if1 + ` type veth peer name ` + if2 + `
 `
-	_, err := exec.Command("/bin/sh", "-e", "-c", script1).Output()
-	if err != nil {
-		log.Fatal(err)
-	}
+	_, err := exec.Command("/bin/sh", "-e", "-c", script).Output()
+	return err
 }
 
-func setup2(ns, if1, if2 string, i1, i2 IP4) {
+func setup2(ns, if1, if2 string, i1, i2 IP4) error {
 	ip1 := i1.String()
 	ip2 := i2.String()
 	cb := i1
@@ -113,7 +114,7 @@ func setup2(ns, if1, if2 string, i1, i2 IP4) {
 	cb[3] = 0
 	cbs := cb.String()
 
-	script1 := `
+	script := `
 ip netns del ` + ns + ` >/dev/null 2>&1 || true
 ip l set ` + if1 + ` up
 ip a add ` + ip1 + `/30 dev ` + if1 + `
@@ -122,8 +123,6 @@ ip link set ` + if2 + ` netns ` + ns + `
 ip netns exec vc5 /bin/sh -c "ip l set ` + if2 + ` up && ip a add ` + ip2 + `/30 dev ` + if2 + ` && ip r replace default via ` + ip1 + ` && ip netns exec ` + ns + ` ethtool -K ` + if2 + ` tx off"
 ip r replace ` + cbs + `/16 via ` + ip2 + `
 `
-	_, err := exec.Command("/bin/sh", "-e", "-c", script1).Output()
-	if err != nil {
-		log.Fatal(err)
-	}
+	_, err := exec.Command("/bin/sh", "-e", "-c", script).Output()
+	return err
 }

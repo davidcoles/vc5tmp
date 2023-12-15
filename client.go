@@ -25,7 +25,6 @@ import (
 
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"sort"
@@ -36,11 +35,6 @@ import (
 
 	"github.com/davidcoles/vc5tmp/bpf"
 	"github.com/davidcoles/vc5tmp/xdp"
-)
-
-const (
-	A = false
-	B = true
 )
 
 type be_state struct {
@@ -515,8 +509,8 @@ func (b *Client) CreateDestination(s Service, d Destination) error {
 
 	vr := bpf_vrpp{vip: svc.IP, rip: rip, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
 	b.maps.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
-	b.maps.update_vrpp_concurrent(A, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
-	b.maps.update_vrpp_concurrent(B, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
+	b.maps.update_vrpp_concurrent(0, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
+	b.maps.update_vrpp_concurrent(1, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
 
 	b.update_nat_map()
 
@@ -688,7 +682,11 @@ func (m *Maps) set_map(name string, k, v int) (err error) {
 
 func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error) {
 
-	ulimit_l()
+	err := ulimit_l()
+
+	if err != nil {
+		return nil, err
+	}
 
 	var m maps
 	m.m = make(map[string]int)
@@ -768,20 +766,21 @@ func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error)
 	return &m, nil
 }
 
-func ulimit_l() {
+func ulimit_l() error {
 	const RLIMIT_MEMLOCK = 8
 
 	var resource int = RLIMIT_MEMLOCK
 
 	var rLimit syscall.Rlimit
 	if err := syscall.Getrlimit(resource, &rLimit); err != nil {
-		log.Fatal("Error Getting Rlimit ", err)
+		return err
 	}
 	rLimit.Max = 0xffffffffffffffff
 	rLimit.Cur = 0xffffffffffffffff
 	if err := syscall.Setrlimit(resource, &rLimit); err != nil {
-		log.Fatal("Error Setting Rlimit ", err)
+		return err
 	}
+	return nil
 }
 
 // func update_backend(curr, prev *be_state, l types.Logger) bool {
