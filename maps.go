@@ -26,6 +26,8 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"syscall"
+	"unsafe"
 
 	"github.com/davidcoles/vc5tmp/bpf"
 	"github.com/davidcoles/vc5tmp/maglev"
@@ -180,22 +182,22 @@ const (
 	_FLOW_SHARE      = "flow_share"
 )
 
-func (m *maps) service_backend() int { return m.m[_SERVICE_BACKEND] }
-func (m *maps) vrpp_counter() int    { return m.m[_VRPP_COUNTER] }
-func (m *maps) vrpp_concurrent() int { return m.m[_VRPP_CONCURRENT] }
-func (m *maps) globals() int         { return m.m[_GLOBALS] }
-func (m *maps) settings() int        { return m.m[_SETTINGS] }
-func (m *maps) nat() int             { return m.m[_NAT] }
-func (m *maps) prefix_counters() int { return m.m[_PREFIX_COUNTERS] }
-func (m *maps) prefix_drop() int     { return m.m[_PREFIX_DROP] }
-func (m *maps) redirect_map() int    { return m.m[_REDIRECT_MAP] }
-func (m *maps) redirect_mac() int    { return m.m[_REDIRECT_MAC] }
-func (m *maps) flow_queue() int      { return m.m[_FLOW_QUEUE] }
-func (m *maps) flow_share() int      { return m.m[_FLOW_SHARE] }
+func (m *Maps) service_backend() int { return m.m[_SERVICE_BACKEND] }
+func (m *Maps) vrpp_counter() int    { return m.m[_VRPP_COUNTER] }
+func (m *Maps) vrpp_concurrent() int { return m.m[_VRPP_CONCURRENT] }
+func (m *Maps) globals() int         { return m.m[_GLOBALS] }
+func (m *Maps) settings() int        { return m.m[_SETTINGS] }
+func (m *Maps) nat() int             { return m.m[_NAT] }
+func (m *Maps) prefix_counters() int { return m.m[_PREFIX_COUNTERS] }
+func (m *Maps) prefix_drop() int     { return m.m[_PREFIX_DROP] }
+func (m *Maps) redirect_map() int    { return m.m[_REDIRECT_MAP] }
+func (m *Maps) redirect_mac() int    { return m.m[_REDIRECT_MAC] }
+func (m *Maps) flow_queue() int      { return m.m[_FLOW_QUEUE] }
+func (m *Maps) flow_share() int      { return m.m[_FLOW_SHARE] }
 
 const PREFIXES = 1048576
 
-func (m *maps) ReadPrefixCounters() [PREFIXES]uint64 {
+func (m *Maps) ReadPrefixCounters() [PREFIXES]uint64 {
 
 	var prefixes [PREFIXES]uint64
 
@@ -218,14 +220,14 @@ func (m *maps) ReadPrefixCounters() [PREFIXES]uint64 {
 	return prefixes
 }
 
-func (m *maps) update_redirect(vid uint16, mac MAC, idx uint32) {
+func (m *Maps) update_redirect(vid uint16, mac MAC, idx uint32) {
 	vid32 := uint32(vid)
 	xdp.BpfMapUpdateElem(m.redirect_mac(), uP(&vid32), uP(&(mac)), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(m.redirect_map(), uP(&vid32), uP(&(idx)), xdp.BPF_ANY)
 
 }
 
-func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
+func (m *Maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
 
 	all := make([]bpf_backend, xdp.BpfNumPossibleCpus())
 
@@ -236,7 +238,7 @@ func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uin
 	return xdp.BpfMapUpdateElem(m.service_backend(), uP(key), uP(&(all[0])), flag)
 }
 
-func (m *maps) update_drop_map(drop [PREFIXES / 64]uint64) int {
+func (m *Maps) update_drop_map(drop [PREFIXES / 64]uint64) int {
 
 	var key uint32
 	val := make([]uint64, xdp.BpfNumPossibleCpus())
@@ -255,7 +257,7 @@ func (m *maps) update_drop_map(drop [PREFIXES / 64]uint64) int {
 	return 0
 }
 
-func (m *maps) update_vrpp_counter(v *bpf_vrpp, c *bpf_counter, flag uint64) int {
+func (m *Maps) update_vrpp_counter(v *bpf_vrpp, c *bpf_counter, flag uint64) int {
 
 	all := make([]bpf_counter, xdp.BpfNumPossibleCpus())
 
@@ -266,7 +268,7 @@ func (m *maps) update_vrpp_counter(v *bpf_vrpp, c *bpf_counter, flag uint64) int
 	return xdp.BpfMapUpdateElem(m.vrpp_counter(), uP(v), uP(&(all[0])), flag)
 }
 
-func (m *maps) lookup_vrpp_counter(v *bpf_vrpp, c *bpf_counter) int {
+func (m *Maps) lookup_vrpp_counter(v *bpf_vrpp, c *bpf_counter) int {
 
 	co := make([]bpf_counter, xdp.BpfNumPossibleCpus())
 
@@ -283,7 +285,7 @@ func (m *maps) lookup_vrpp_counter(v *bpf_vrpp, c *bpf_counter) int {
 	return ret
 }
 
-func (m *maps) update_vrpp_concurrent(era uint8, v *bpf_vrpp, a *bpf_active, flag uint64) int {
+func (m *Maps) update_vrpp_concurrent(era uint8, v *bpf_vrpp, a *bpf_active, flag uint64) int {
 
 	all := make([]bpf_active, xdp.BpfNumPossibleCpus())
 
@@ -302,7 +304,7 @@ func (m *maps) update_vrpp_concurrent(era uint8, v *bpf_vrpp, a *bpf_active, fla
 	return xdp.BpfMapUpdateElem(m.vrpp_concurrent(), uP(v), uP(&(all[0])), flag)
 }
 
-func (m *maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int {
+func (m *Maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int {
 
 	co := make([]bpf_active, xdp.BpfNumPossibleCpus())
 
@@ -336,7 +338,7 @@ func (m *maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int 
 #define DEFCON5 5 // flows shared via flow_queue/flow_shared
 */
 
-func (m *maps) write_settings() int {
+func (m *Maps) write_settings() int {
 	var zero uint32
 	m.setting.heartbeat = 0
 
@@ -383,22 +385,22 @@ func (m *maps) write_settings() int {
 	return xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&(all[0])), xdp.BPF_ANY)
 }
 
-func (m *maps) MultiNIC(mode bool) {
+func (m *Maps) MultiNIC(mode bool) {
 	m.features.MULTINIC = mode
 	m.write_settings()
 }
 
-func (m *maps) Distributed(d bool) {
+func (m *Maps) Distributed(d bool) {
 	m.distributed = d
 	m.write_settings()
 }
 
-func (m *maps) Era(era uint8) {
+func (m *Maps) Era(era uint8) {
 	m.setting.era = era
 	m.write_settings()
 }
 
-func (m *maps) DEFCON(d uint8) uint8 {
+func (m *Maps) DEFCON(d uint8) uint8 {
 	if d > 5 {
 		return m.defcon
 	}
@@ -409,7 +411,7 @@ func (m *maps) DEFCON(d uint8) uint8 {
 	return m.defcon
 }
 
-func (m *maps) lookup_globals() bpf_global { //(g *bpf_global) int {
+func (m *Maps) lookup_globals() bpf_global { //(g *bpf_global) int {
 
 	all := make([]bpf_global, xdp.BpfNumPossibleCpus())
 	var zero uint32
@@ -700,4 +702,112 @@ func pow(x int) uint64 {
 		return 0x8000000000000000
 	}
 	return 0
+}
+
+func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error) {
+
+	err := ulimit_l()
+
+	if err != nil {
+		return nil, err
+	}
+
+	var m maps
+	m.m = make(map[string]int)
+	m.defcon = 5
+
+	x, err := xdp.LoadBpfProgram(_BPF_O)
+	m.x = x
+
+	if err != nil {
+		return nil, err
+	}
+
+	if vetha != "" {
+		err = x.LoadBpfSection("outgoing", false, vetha)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if vethb != "" {
+		err = x.LoadBpfSection("outgoing", true, vethb)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	for _, e := range eth {
+		err = x.LoadBpfSection("incoming", native, e)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var global bpf_global
+	var vrpp bpf_vrpp
+	var counter bpf_counter
+	var active bpf_active
+
+	global_s := int(unsafe.Sizeof(global))
+	vrpp_s := int(unsafe.Sizeof(vrpp))
+	counter_s := int(unsafe.Sizeof(counter))
+	active_s := int(unsafe.Sizeof(active))
+
+	type mi struct {
+		name string
+		klen int
+		vlen int
+	}
+
+	maps := []mi{
+		mi{_SERVICE_BACKEND, 8, (256 * 16) + 8192},
+		mi{_NAT, 20, 28},
+		mi{_GLOBALS, 4, global_s},
+		mi{_VRPP_COUNTER, vrpp_s, counter_s},
+		mi{_VRPP_CONCURRENT, vrpp_s, active_s},
+		mi{_SETTINGS, 4, 8},
+		mi{_REDIRECT_MAP, 4, 4},
+		mi{_REDIRECT_MAC, 4, 6},
+		mi{_PREFIX_COUNTERS, 4, 8},
+		mi{_PREFIX_DROP, 4, 8},
+		mi{_FLOW_QUEUE, 0, bpf.FLOW_S + bpf.STATE_S},
+		mi{_FLOW_SHARE, bpf.FLOW_S, bpf.STATE_S},
+	}
+
+	for _, x := range maps {
+		if err = m.set_map(x.name, x.klen, x.vlen); err != nil {
+			return nil, err
+		}
+	}
+
+	m.MultiNIC(multi)
+
+	if m.write_settings() != 0 {
+		return nil, errors.New("Failed to write settings")
+	}
+
+	return &m, nil
+}
+
+func (m *Maps) set_map(name string, k, v int) (err error) {
+	m.m[name], err = find_map(m.x, name, k, v)
+	return err
+}
+
+func ulimit_l() error {
+	const RLIMIT_MEMLOCK = 8
+
+	var resource int = RLIMIT_MEMLOCK
+
+	var rLimit syscall.Rlimit
+	if err := syscall.Getrlimit(resource, &rLimit); err != nil {
+		return err
+	}
+	rLimit.Max = 0xffffffffffffffff
+	rLimit.Cur = 0xffffffffffffffff
+	if err := syscall.Setrlimit(resource, &rLimit); err != nil {
+		return err
+	}
+	return nil
 }

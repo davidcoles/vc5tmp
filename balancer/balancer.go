@@ -1,11 +1,15 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"time"
 
 	"github.com/davidcoles/vc5tmp"
@@ -26,7 +30,7 @@ var extra strings
 
 /*
 
-First argument needs to be a file which contains something like:
+vlan argument needs to be a file which contains something like:
 
 {
     "10": "10.1.10.0/24",
@@ -71,7 +75,7 @@ func main() {
 	var err error
 
 	if *file != "" {
-		vlans, err = vc5tmp.Load(*file)
+		vlans, err = load(*file)
 
 		if err != nil {
 			log.Fatal(err)
@@ -85,7 +89,7 @@ func main() {
 		MultiNIC:   *multi,
 	}
 
-	err = client.Start(addr, "")
+	err = client.Start(addr)
 
 	if err != nil {
 		log.Fatal(err)
@@ -125,4 +129,72 @@ func main() {
 
 func sleep(t time.Duration) {
 	time.Sleep(t * time.Second)
+}
+
+type Prefix net.IPNet
+
+func (p *Prefix) String() string {
+	return (*net.IPNet)(p).String()
+}
+
+func (p *Prefix) Contains(i net.IP) bool {
+	return (*net.IPNet)(p).Contains(i)
+}
+
+func (p *Prefix) UnmarshalJSON(data []byte) error {
+
+	l := len(data)
+
+	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+		return errors.New("CIDR address should be a string: " + string(data))
+	}
+
+	cidr := string(data[1 : l-1])
+
+	ip, ipnet, err := net.ParseCIDR(cidr)
+
+	if err != nil {
+		return err
+	}
+
+	if ip.String() != ipnet.IP.String() {
+		return errors.New("CIDR address contains host portion: " + cidr)
+	}
+
+	*p = Prefix(*ipnet)
+
+	return nil
+}
+
+func load(file string) (map[uint16]net.IPNet, error) {
+
+	f, err := os.Open(file)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer f.Close()
+
+	b, err := ioutil.ReadAll(f)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var foo map[uint16]Prefix
+
+	err = json.Unmarshal(b, &foo)
+
+	if err != nil {
+		return nil, err
+	}
+
+	bar := map[uint16]net.IPNet{}
+
+	for k, v := range foo {
+		bar[k] = net.IPNet(v)
+	}
+
+	return bar, nil
 }

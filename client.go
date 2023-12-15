@@ -19,19 +19,13 @@
 package vc5tmp
 
 import (
-	"encoding/json"
-	"io/ioutil"
-	"os"
-
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"sort"
 	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/davidcoles/vc5tmp/bpf"
 	"github.com/davidcoles/vc5tmp/xdp"
@@ -68,7 +62,7 @@ type Client struct {
 
 	tag_map tag_map
 	nat_map nat_map
-	vlans   map[uint16]net.IPNet // only get updated by config change
+	vlans   map[uint16]net.IPNet // only gets updated by config change
 }
 
 func (b *Client) Namespace() string {
@@ -84,7 +78,8 @@ func (b *Client) arp() map[IP4]MAC {
 }
 
 // func (b *Client) Start(address string, nic string, phy ...string) error {
-func (b *Client) Start(addr netip.Addr, nic string) error {
+// func (b *Client) Start(addr netip.Addr, nic string) error {
+func (b *Client) Start(addr netip.Addr) error {
 
 	if !addr.Is4() {
 		return errors.New("Not an IPv4 address: " + addr.String())
@@ -107,21 +102,29 @@ func (b *Client) Start(addr netip.Addr, nic string) error {
 
 	ip := addr.As4()
 
-	if nic == "" {
-		nic = phy[0]
+	iface := VlanInterfaceX(net.IP{ip[0], ip[1], ip[2], ip[3]})
+
+	if iface == nil {
+		return errors.New("Couldn't locate interface for IP: " + addr.String())
 	}
 
-	iface, err := net.InterfaceByName(nic)
-	if err != nil {
-		return err
-	}
+	/*
+		if nic == "" {
+			nic = phy[0]
+		}
+
+		iface, err := net.InterfaceByName(nic)
+		if err != nil {
+			return err
+		}
+	*/
 
 	var vetha, vethb string
 
 	if b.NAT {
 		b.netns = &netns{}
 
-		err = b.netns.Init(IP4{ip[0], ip[1], ip[2], ip[3]}, iface)
+		err := b.netns.Init(IP4{ip[0], ip[1], ip[2], ip[3]}, iface)
 
 		if err != nil {
 			return err
@@ -132,6 +135,8 @@ func (b *Client) Start(addr netip.Addr, nic string) error {
 
 		fmt.Println(b.netns)
 	}
+
+	var err error
 
 	b.maps, err = open(b.Native, b.MultiNIC, vetha, vethb, phy...)
 
@@ -675,114 +680,6 @@ func (b *Client) update_service(svc svc, s *Service, arp map[IP4]MAC, force bool
 	}
 }
 
-func (m *Maps) set_map(name string, k, v int) (err error) {
-	m.m[name], err = find_map(m.x, name, k, v)
-	return err
-}
-
-func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error) {
-
-	err := ulimit_l()
-
-	if err != nil {
-		return nil, err
-	}
-
-	var m maps
-	m.m = make(map[string]int)
-	m.defcon = 5
-
-	x, err := xdp.LoadBpfProgram(_BPF_O)
-	m.x = x
-
-	if err != nil {
-		return nil, err
-	}
-
-	if vetha != "" {
-		err = x.LoadBpfSection("outgoing", false, vetha)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if vethb != "" {
-		err = x.LoadBpfSection("outgoing", true, vethb)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for _, e := range eth {
-		err = x.LoadBpfSection("incoming", native, e)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	var global bpf_global
-	var vrpp bpf_vrpp
-	var counter bpf_counter
-	var active bpf_active
-
-	global_s := int(unsafe.Sizeof(global))
-	vrpp_s := int(unsafe.Sizeof(vrpp))
-	counter_s := int(unsafe.Sizeof(counter))
-	active_s := int(unsafe.Sizeof(active))
-
-	type mi struct {
-		name string
-		klen int
-		vlen int
-	}
-
-	maps := []mi{
-		mi{_SERVICE_BACKEND, 8, (256 * 16) + 8192},
-		mi{_NAT, 20, 28},
-		mi{_GLOBALS, 4, global_s},
-		mi{_VRPP_COUNTER, vrpp_s, counter_s},
-		mi{_VRPP_CONCURRENT, vrpp_s, active_s},
-		mi{_SETTINGS, 4, 8},
-		mi{_REDIRECT_MAP, 4, 4},
-		mi{_REDIRECT_MAC, 4, 6},
-		mi{_PREFIX_COUNTERS, 4, 8},
-		mi{_PREFIX_DROP, 4, 8},
-		mi{_FLOW_QUEUE, 0, bpf.FLOW_S + bpf.STATE_S},
-		mi{_FLOW_SHARE, bpf.FLOW_S, bpf.STATE_S},
-	}
-
-	for _, x := range maps {
-		if err = m.set_map(x.name, x.klen, x.vlen); err != nil {
-			return nil, err
-		}
-	}
-
-	m.MultiNIC(multi)
-
-	if m.write_settings() != 0 {
-		return nil, errors.New("Failed to write settings")
-	}
-
-	return &m, nil
-}
-
-func ulimit_l() error {
-	const RLIMIT_MEMLOCK = 8
-
-	var resource int = RLIMIT_MEMLOCK
-
-	var rLimit syscall.Rlimit
-	if err := syscall.Getrlimit(resource, &rLimit); err != nil {
-		return err
-	}
-	rLimit.Max = 0xffffffffffffffff
-	rLimit.Cur = 0xffffffffffffffff
-	if err := syscall.Setrlimit(resource, &rLimit); err != nil {
-		return err
-	}
-	return nil
-}
-
 // func update_backend(curr, prev *be_state, l types.Logger) bool {
 func update_backend(curr, prev *be_state) bool {
 
@@ -974,7 +871,7 @@ func (b *Client) natEntry(vip, rip, nat IP4, realhw MAC, vlanid uint16, idx ifac
 	var vc5bip IP4 = b.netns.IpB
 	var vc5bhw MAC = b.netns.HwB
 	var vc5ahw MAC = b.netns.HwA
-	var vethif uint32 = uint32(b.netns.Index)
+	var vethif uint32 = uint32(b.netns.IdA)
 
 	if realhw.IsNil() {
 		return
@@ -986,38 +883,6 @@ func (b *Client) natEntry(vip, rip, nat IP4, realhw MAC, vlanid uint16, idx ifac
 	ret = append(ret, natkeyval{key: key, val: val})
 
 	key = bpf_natkey{src_ip: vip, src_mac: realhw, dst_ip: vlanip, dst_mac: vlanhw}
-	val = bpf_natval{src_ip: nat, src_mac: vc5ahw, dst_ip: vc5bip, dst_mac: vc5bhw, ifindex: vethif}
-
-	ret = append(ret, natkeyval{key: key, val: val})
-
-	return
-}
-
-func (b *Client) _natEntry(vip, rip, nat IP4, realhw MAC, vlanid uint16, idx iface) (ret []natkeyval) {
-
-	var physif uint32 = b.netns.Physif
-	var physhw MAC = b.netns.Physhw
-
-	var vc5bip IP4 = b.netns.IpB
-	var vc5bhw MAC = b.netns.HwB
-	var vc5ahw MAC = b.netns.HwA
-
-	fmt.Println("********************", physif, physhw)
-
-	var vethif uint32 = uint32(b.netns.Index)
-
-	vlanip := idx.ip4
-
-	if realhw.IsNil() {
-		return
-	}
-
-	key := bpf_natkey{src_ip: vc5bip, dst_ip: nat, src_mac: vc5bhw, dst_mac: vc5ahw}
-	val := bpf_natval{src_ip: vlanip, dst_ip: vip, src_mac: physhw, dst_mac: realhw, ifindex: physif, vlan: vlanid}
-
-	ret = append(ret, natkeyval{key: key, val: val})
-
-	key = bpf_natkey{src_ip: vip, src_mac: realhw, dst_ip: vlanip, dst_mac: physhw}
 	val = bpf_natval{src_ip: nat, src_mac: vc5ahw, dst_ip: vc5bip, dst_mac: vc5bhw, ifindex: vethif}
 
 	ret = append(ret, natkeyval{key: key, val: val})
@@ -1086,71 +951,50 @@ func VlanInterface(prefix net.IPNet) (ret iface, _ bool) {
 	return
 }
 
-type prefix = Prefix
-type Prefix net.IPNet
-
-func (p *prefix) String() string {
-	return (*net.IPNet)(p).String()
-}
-
-func (p *prefix) Contains(i net.IP) bool {
-	return (*net.IPNet)(p).Contains(i)
-}
-
-func (p *prefix) UnmarshalJSON(data []byte) error {
-
-	l := len(data)
-
-	if l < 3 || data[0] != '"' || data[l-1] != '"' {
-		return errors.New("CIDR address should be a string: " + string(data))
-	}
-
-	cidr := string(data[1 : l-1])
-
-	ip, ipnet, err := net.ParseCIDR(cidr)
+func VlanInterfaceX(ADDR net.IP) *net.Interface {
+	ifaces, err := net.Interfaces()
 
 	if err != nil {
-		return err
+		return nil
 	}
 
-	if ip.String() != ipnet.IP.String() {
-		return errors.New("CIDR address contains host portion: " + cidr)
-	}
+	for _, i := range ifaces {
 
-	*p = prefix(*ipnet)
+		if i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		if i.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		if i.Flags&net.FlagBroadcast == 0 {
+			continue
+		}
+
+		if len(i.HardwareAddr) != 6 {
+			continue
+		}
+
+		var mac MAC
+		copy(mac[:], i.HardwareAddr[:])
+
+		addr, err := i.Addrs()
+
+		if err == nil {
+			for _, a := range addr {
+
+				cidr := a.String()
+				ip, _, err := net.ParseCIDR(cidr)
+
+				ip4 := ip.To4()
+
+				if err == nil && ip4 != nil && ip.Equal(ADDR) {
+					return &i
+				}
+			}
+		}
+	}
 
 	return nil
-}
-
-func Load(file string) (map[uint16]net.IPNet, error) {
-
-	f, err := os.Open(file)
-
-	if err != nil {
-		return nil, err
-	}
-
-	defer f.Close()
-
-	b, err := ioutil.ReadAll(f)
-
-	if err != nil {
-		return nil, err
-	}
-
-	var foo map[uint16]prefix
-
-	err = json.Unmarshal(b, &foo)
-
-	if err != nil {
-		return nil, err
-	}
-
-	bar := map[uint16]net.IPNet{}
-
-	for k, v := range foo {
-		bar[k] = net.IPNet(v)
-	}
-
-	return bar, nil
 }

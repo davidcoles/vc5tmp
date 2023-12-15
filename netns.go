@@ -28,11 +28,12 @@ const NAMESPACE = "vc5"
 var IP IP4 = IP4{10, 255, 255, 254}
 
 type netns struct {
+	IdA      int
 	IfA, IfB string
 	IpA, IpB IP4
 	HwA, HwB MAC
-	Index    int
-	NS       string
+	//Index    int
+	NS string
 
 	Physif uint32
 	Physhw MAC
@@ -70,7 +71,8 @@ func (n *netns) Init(ip IP4, out *net.Interface) error {
 	}
 	copy(n.HwA[:], iface.HardwareAddr[:])
 
-	n.Index = iface.Index
+	//n.Index = iface.Index
+	n.IdA = iface.Index
 
 	iface, err = net.InterfaceByName(n.IfB)
 	if err != nil {
