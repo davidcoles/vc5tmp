@@ -279,7 +279,7 @@ func (b *Client) update_nat_and_redirects() {
 		nat = b.nat_entries(ifaces, nat_map, tag_map, b.hwaddr)
 	}
 
-	var changed bool
+	//var changed bool
 	var updated, deleted int
 
 	old := map[bpf_natkey]bpf_natval{}
@@ -293,7 +293,7 @@ func (b *Client) update_nat_and_redirects() {
 		v := e.val
 
 		if x, ok := old[k]; !ok || v != x {
-			changed = true
+			//changed = true
 			updated++
 			xdp.BpfMapUpdateElem(b.maps.nat(), uP(&(e.key)), uP(&(e.val)), xdp.BPF_ANY)
 		}
