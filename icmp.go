@@ -31,14 +31,13 @@ func ICMP() *ICMPs {
 
 	var icmp ICMPs
 
-	c, err := net.ListenPacket("ip4:icmp", "")
+	conn, err := net.ListenPacket("ip4:icmp", "")
 	if err != nil {
-		//log.Fatalf("listen err, %s", err)
 		return nil
 	}
 
 	icmp.submit = make(chan string, 1000)
-	go icmp.probe(c)
+	go icmp.probe(conn)
 
 	return &icmp
 }
@@ -77,14 +76,14 @@ func (s *ICMPs) echoRequest() []byte {
 	return wb
 }
 
-func (s *ICMPs) probe(socket net.PacketConn) {
+func (s *ICMPs) probe(conn net.PacketConn) {
 
-	defer socket.Close()
+	defer conn.Close()
 
 	for t := range s.submit {
-		socket.SetWriteDeadline(time.Now().Add(time.Second))
+		conn.SetWriteDeadline(time.Now().Add(time.Second))
 		go func(target string) {
-			socket.WriteTo(s.echoRequest(), &net.IPAddr{IP: net.ParseIP(target)})
+			conn.WriteTo(s.echoRequest(), &net.IPAddr{IP: net.ParseIP(target)})
 		}(t)
 	}
 }

@@ -11,3 +11,5 @@ As the BPF is for a virtual architecture then is doesn't matter what platform th
 Includes bgp and monitoring cod for now for convenience.
 
 NAT probably won't work on a tagged interface just yet?
+
+XDP Virtual Server

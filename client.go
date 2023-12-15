@@ -241,7 +241,7 @@ func (b *Client) update_arp() {
 	b.hwaddr = hwaddr
 
 	if changed {
-		fmt.Println("ARP CHANGED", hwaddr)
+		fmt.Println("ARP:", hwaddr)
 		select {
 		case b.update <- true:
 		default:
@@ -311,15 +311,15 @@ func (b *Client) update_nat_and_redirects() {
 	fmt.Println("NAT: entries", len(nat), "updated", updated, "deleted", deleted)
 
 	// should determine if anything has changed (eg. MAC)
-
-	if changed {
-
-		fmt.Println("NAT CHANGED")
-		select {
-		case b.update <- true: // trigger rebuild of forwarding
-		default:
+	/*
+		if changed {
+			fmt.Println("NAT CHANGED")
+			select {
+			case b.update <- true: // trigger rebuild of forwarding
+			default:
+			}
 		}
-	}
+	*/
 }
 
 func (b *Client) update_services() {
