@@ -22,6 +22,7 @@ package xdp
 #cgo LDFLAGS: -l:libbpf.a -lelf -lz
 #include <bpf.h>
 #include <libbpf.h>
+#include <sys/resource.h>
 #include "xdp.h"
 */
 import "C"
@@ -38,6 +39,8 @@ const (
 	BPF_NOEXIST = C.BPF_NOEXIST
 	BPF_EXIST   = C.BPF_EXIST
 )
+
+const RLIMIT_MEMLOCK = C.RLIMIT_MEMLOCK
 
 type XDP struct {
 	p unsafe.Pointer

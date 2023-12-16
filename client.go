@@ -46,7 +46,7 @@ type Client struct {
 	NAT        bool
 	Native     bool
 	MultiNIC   bool
-	Address    net.IP // find default interface when not in VLAN mode
+	Address    netip.Addr // find default interface when not in VLAN mode
 
 	mutex sync.Mutex
 

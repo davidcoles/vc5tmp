@@ -180,21 +180,6 @@ func (c *Client) targets() (r []IP4) {
 	return
 }
 
-type x_service struct {
-	VIP      IP4
-	Port     uint16
-	Protocol protocol
-
-	Scheduler        uint8
-	Sticky           bool
-	Leastconns       bool
-	LeastconnsIP     IP4
-	LeastconnsWeight uint8
-
-	backend map[IP4]*Destination
-	state   *be_state
-}
-
 func (s *Service) Service(x svc) Service {
 	var r Service
 	r.Address = s.Address //netip.AddrFrom4(s.VIP)

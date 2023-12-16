@@ -796,9 +796,9 @@ func (m *Maps) set_map(name string, k, v int) (err error) {
 }
 
 func ulimit_l() error {
-	const RLIMIT_MEMLOCK = 8
+	//const RLIMIT_MEMLOCK = 8
 
-	var resource int = RLIMIT_MEMLOCK
+	var resource int = xdp.RLIMIT_MEMLOCK
 
 	var rLimit syscall.Rlimit
 	if err := syscall.Getrlimit(resource, &rLimit); err != nil {
