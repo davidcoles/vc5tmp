@@ -46,6 +46,7 @@ type Client struct {
 	NAT        bool
 	Native     bool
 	MultiNIC   bool
+	Address    net.IP // find default interface when not in VLAN mode
 
 	mutex sync.Mutex
 
@@ -555,6 +556,11 @@ func (b *Client) Destinations(s Service) ([]DestinationExtended, error) {
 		de.MAC = b.hwaddr[rip]
 		destinations = append(destinations, de)
 	}
+
+	sort.SliceStable(destinations, func(i, j int) bool {
+		//return nltoh(a[i]) < nltoh(a[j])
+		return destinations[i].Destination.Address.Compare(destinations[j].Destination.Address) < 0
+	})
 
 	return destinations, nil
 }
