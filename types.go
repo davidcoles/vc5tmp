@@ -180,22 +180,13 @@ func (c *Client) targets() (r []IP4) {
 	return
 }
 
-func (s *Service) Service(x svc) Service {
-	var r Service
-	r.Address = s.Address //netip.AddrFrom4(s.VIP)
-	r.Port = s.Port
-	r.Protocol = s.Protocol
-	r.backend = map[IP4]*Destination{}
-	return r
-}
-
 type Service struct {
 	Address  netip.Addr
 	Port     uint16
 	Protocol protocol
 
-	//Scheduler uint8
 	Sticky bool
+	//Scheduler uint8
 	//Leastconns       bool
 	//LeastconnsIP     IP4
 	//LeastconnsWeight uint8
@@ -203,6 +194,15 @@ type Service struct {
 	backend map[IP4]*Destination
 	state   *be_state
 }
+
+func (s *Service) Service(x svc) Service {
+	var r Service
+	r = *s
+	r.backend = map[IP4]*Destination{}
+	r.state = nil
+	return r
+}
+
 type ServiceExtended struct {
 	Service Service
 	Stats   Stats
