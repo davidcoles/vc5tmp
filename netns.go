@@ -35,21 +35,23 @@ type netns struct {
 	//Index    int
 	NS string
 
-	Physif uint32
-	Physhw MAC
-	Physip IP4
-	phys   iface
+	//xPhysif uint32
+	//xPhyshw MAC
+	//xPhysip IP4
+	phys iface
 }
 
 func (n *netns) Init(ip IP4, out *net.Interface) error {
 
-	n.Physip = ip
-	n.Physif = uint32(out.Index)
-	copy(n.Physhw[:], out.HardwareAddr[:])
+	//n.xPhysip = ip
+	//n.xPhysif = uint32(out.Index)
+	//copy(n.xPhyshw[:], out.HardwareAddr[:])
 
-	n.phys.ip4 = ip
-	n.phys.idx = uint32(out.Index)
-	copy(n.phys.mac[:], out.HardwareAddr[:])
+	if out != nil {
+		n.phys.ip4 = ip
+		n.phys.idx = uint32(out.Index)
+		copy(n.phys.mac[:], out.HardwareAddr[:])
+	}
 
 	n.NS = NAMESPACE
 	n.IfA = NAMESPACE

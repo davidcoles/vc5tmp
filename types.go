@@ -244,6 +244,16 @@ func (d *Destination) extend(ip IP4) DestinationExtended {
 	return de
 }
 
+type Info struct {
+	Packets   uint64
+	Octets    uint64
+	Flows     uint64
+	Latency   uint64
+	Dropped   uint64
+	Blocked   uint64
+	NotQueued uint64
+}
+
 type Stats struct {
 	Packets uint64
 	Octets  uint64

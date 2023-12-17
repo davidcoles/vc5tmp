@@ -52,10 +52,11 @@ type Client struct {
 
 	service map[svc]*Service
 
-	netns *netns
-	maps  *maps
-	icmp  *ICMPs
-	nat   []natkeyval
+	ifaces map[uint16]iface
+	netns  *netns
+	maps   *maps
+	icmp   *ICMPs
+	nat    []natkeyval
 
 	hwaddr map[IP4]MAC
 
@@ -66,27 +67,43 @@ type Client struct {
 	vlans   map[uint16]net.IPNet // only gets updated by config change
 }
 
-func (b *Client) Namespace() string {
+func (c *Client) Namespace() string {
 	return NAMESPACE
 }
 
-func (b *Client) NamespaceAddress() string {
+func (c *Client) NamespaceAddress() string {
 	return IP.String()
 }
 
-func (b *Client) arp() map[IP4]MAC {
+func (c *Client) arp() map[IP4]MAC {
 	return arp()
 }
 
-// func (b *Client) Start(address string, nic string, phy ...string) error {
-// func (b *Client) Start(addr netip.Addr, nic string) error {
-func (b *Client) Start(addr netip.Addr) error {
+func (c *Client) Info() (i Info) {
+	/*
+	   rx_packets     uint64
+	   rx_octets      uint64
+	   perf_packets   uint64
+	   perf_timens    uint64
+	   perf_timer     uint64
+	   settings_timer uint64
+	   new_flows      uint64
+	   dropped        uint64
+	   qfailed        uint64
+	   blocked        uint64
+	*/
+	g := c.maps.lookup_globals()
+	i.Packets = g.rx_packets
+	i.Octets = g.rx_octets
+	i.Flows = g.new_flows
+	i.Latency = g.latency()
+	i.Dropped = g.dropped
+	i.Blocked = g.blocked
+	i.NotQueued = g.qfailed
+	return
+}
 
-	if !addr.Is4() {
-		return errors.New("Not an IPv4 address: " + addr.String())
-	}
-
-	//address := addr.String()
+func (b *Client) Start() error {
 
 	phy := b.Interfaces
 
@@ -101,31 +118,37 @@ func (b *Client) Start(addr netip.Addr) error {
 		b.vlans = b.VLANs
 	}
 
-	ip := addr.As4()
-
-	iface := VlanInterfaceX(net.IP{ip[0], ip[1], ip[2], ip[3]})
-
-	if iface == nil {
-		return errors.New("Couldn't locate interface for IP: " + addr.String())
-	}
-
-	/*
-		if nic == "" {
-			nic = phy[0]
-		}
-
-		iface, err := net.InterfaceByName(nic)
-		if err != nil {
-			return err
-		}
-	*/
-
 	var vetha, vethb string
 
 	if b.NAT {
+
+		var default_ip IP4
+		var default_if *net.Interface
+
+		if len(b.VLANs) < 1 {
+			// address must be present
+
+			addr := b.Address
+
+			if !addr.IsValid() {
+				return errors.New("Not an IPv4 address")
+			}
+
+			if !addr.Is4() {
+				return errors.New("Not an IPv4 address: " + addr.String())
+			}
+
+			default_ip = IP4(addr.As4())
+			default_if = DefaultInterface(default_ip)
+
+			if default_if == nil {
+				return errors.New("Couldn't locate interface for IP: " + addr.String())
+			}
+		}
+
 		b.netns = &netns{}
 
-		err := b.netns.Init(IP4{ip[0], ip[1], ip[2], ip[3]}, iface)
+		err := b.netns.Init(default_ip, default_if)
 
 		if err != nil {
 			return err
@@ -154,6 +177,8 @@ func (b *Client) Start(addr netip.Addr) error {
 	}
 
 	b.icmp = ICMP()
+
+	b.scan_interfaces()
 
 	go b.background()
 
@@ -187,6 +212,9 @@ func (b *Client) background() {
 	arp := time.NewTicker(2 * time.Second)
 	defer arp.Stop()
 
+	ifaces := time.NewTicker(time.Minute)
+	defer ifaces.Stop()
+
 	for {
 		select {
 		case <-ticker.C:
@@ -196,16 +224,30 @@ func (b *Client) background() {
 			b.maps.Era(era)
 
 		case <-arp.C:
-			b.update_arp()
+			if b.update_arp() {
+				b.trigger_update()
+			}
+
+		case <-ifaces.C:
+			b.scan_interfaces() // check for changes?
+			b.trigger_update()
 
 		case <-b.update:
-			b.update_nat_and_redirects()
+			b.update_redirects()
+			b.update_nat()
 			b.update_services()
 		}
 	}
 }
 
-func (b *Client) update_arp() {
+func (c *Client) trigger_update() {
+	select {
+	case c.update <- true:
+	default:
+	}
+}
+
+func (b *Client) update_arp() bool {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 
@@ -242,48 +284,50 @@ func (b *Client) update_arp() {
 
 	if changed {
 		fmt.Println("ARP:", hwaddr)
-		select {
-		case b.update <- true:
-		default:
-		}
+	}
+
+	return changed
+}
+
+func (c *Client) scan_interfaces() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	fmt.Println("IFS:")
+	c.ifaces = VlanInterfaces(c.vlans)
+}
+
+func (c *Client) update_redirects() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	for vid, iface := range c.ifaces {
+		c.maps.update_redirect(vid, iface.mac, iface.idx)
 	}
 }
 
-func (b *Client) update_nat_and_redirects() {
+func (c *Client) update_nat() {
 
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-
-	// Could probably move it out into another function and only scan interfaces periodically
-	ifaces := VlanInterfaces(b.vlans)
-	for vid, iface := range ifaces {
-		b.maps.update_redirect(vid, iface.mac, iface.idx)
+	if c.netns == nil {
+		return
 	}
 
-	//ifaces := VlanInterfaces(b.vlans)
-	//for vid, iface := range ifaces {
-	//	b.maps.update_redirect(vid, iface.mac, iface.idx)
-	//}
-
-	//// need to check if this would be ok
-	//if b.netns == nil {
-	//	return
-	//}
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
 	var nat []natkeyval
 
-	nat_map := b.nat_map.get()
-	tag_map := b.tag_map.get()
+	nat_map := c.nat_map.get()
+	tag_map := c.tag_map.get()
 
-	if b.netns != nil {
-		nat = b.nat_entries(ifaces, nat_map, tag_map, b.hwaddr)
+	if c.netns != nil {
+		nat = c.nat_entries(c.ifaces, nat_map, tag_map, c.hwaddr)
 	}
 
-	//var changed bool
 	var updated, deleted int
 
 	old := map[bpf_natkey]bpf_natval{}
-	for _, e := range b.nat {
+	for _, e := range c.nat {
 		old[e.key] = e.val
 	}
 
@@ -293,9 +337,8 @@ func (b *Client) update_nat_and_redirects() {
 		v := e.val
 
 		if x, ok := old[k]; !ok || v != x {
-			//changed = true
 			updated++
-			xdp.BpfMapUpdateElem(b.maps.nat(), uP(&(e.key)), uP(&(e.val)), xdp.BPF_ANY)
+			xdp.BpfMapUpdateElem(c.maps.nat(), uP(&(e.key)), uP(&(e.val)), xdp.BPF_ANY)
 		}
 
 		delete(old, k)
@@ -303,51 +346,40 @@ func (b *Client) update_nat_and_redirects() {
 
 	for k, _ := range old {
 		deleted++
-		xdp.BpfMapDeleteElem(b.maps.nat(), uP(&(k)))
+		xdp.BpfMapDeleteElem(c.maps.nat(), uP(&(k)))
 	}
 
-	b.nat = nat
+	c.nat = nat
 
 	fmt.Println("NAT: entries", len(nat), "updated", updated, "deleted", deleted)
-
-	// should determine if anything has changed (eg. MAC)
-	/*
-		if changed {
-			fmt.Println("NAT CHANGED")
-			select {
-			case b.update <- true: // trigger rebuild of forwarding
-			default:
-			}
-		}
-	*/
 }
 
-func (b *Client) update_services() {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+func (c *Client) update_services() {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 
-	for svc, service := range b.service {
-		b.update_service(svc, service, b.hwaddr, false)
+	for svc, service := range c.service {
+		c.update_service(svc, service, c.hwaddr, false)
 	}
 }
 
-func (b *Client) update_nat_map() {
+func (c *Client) update_nat_map() {
 
 	nm := map[[2]IP4]bool{}
 
-	for svc, service := range b.service {
+	for svc, service := range c.service {
 		for rip, _ := range service.backend {
 			vip := svc.IP
 			nm[[2]IP4{vip, rip}] = true
 		}
 	}
 
-	b.nat_map.set(nm)
+	c.nat_map.set(nm)
 
 	go func() {
 		time.Sleep(time.Second)
 		select {
-		case b.update <- true:
+		case c.update <- true:
 		default:
 		}
 	}()
@@ -702,7 +734,7 @@ func (b *Client) update_service(svc svc, s *Service, arp map[IP4]MAC, force bool
 
 	if force || update_backend(val, s.state) {
 		b.maps.update_service_backend(key, &(val.bpf_backend), xdp.BPF_ANY)
-		fmt.Println("Updated table for ", svc, val.bpf_backend.hash[:32], time.Now().Sub(now))
+		fmt.Println("FWD:", svc, val.bpf_backend.hash[:32], time.Now().Sub(now))
 		s.state = val
 	}
 }
@@ -815,19 +847,7 @@ type iface struct {
 	mac MAC
 }
 
-func (b *Client) ifaces() map[uint16]iface {
-	return VlanInterfaces(b.vlans)
-}
-
 func (b *Client) nat_entries(ifaces map[uint16]iface, nat_map nat_map, tag_map tag_map, arp map[IP4]MAC) (nkv []natkeyval) {
-
-	/*
-		ifaces := VlanInterfaces(b.vlans)
-
-		for vid, iface := range ifaces {
-			b.maps.update_redirect(vid, iface.mac, iface.idx)
-		}
-	*/
 
 	if b.netns == nil {
 		return
@@ -846,6 +866,10 @@ func (b *Client) nat_entries(ifaces map[uint16]iface, nat_map nat_map, tag_map t
 		}
 
 		if (len(b.vlans) != 0 && vid == 0) || (len(b.vlans) == 0 && vid != 0) {
+			continue
+		}
+
+		if vid == 0 && b.netns.phys.idx == 0 {
 			continue
 		}
 
@@ -978,7 +1002,12 @@ func VlanInterface(prefix net.IPNet) (ret iface, _ bool) {
 	return
 }
 
-func VlanInterfaceX(ADDR net.IP) *net.Interface {
+func DefaultInterface(addr IP4) *net.Interface {
+
+	fmt.Println(addr)
+
+	ADDR := net.IP(addr[:])
+
 	ifaces, err := net.Interfaces()
 
 	if err != nil {
@@ -1015,6 +1044,8 @@ func VlanInterfaceX(ADDR net.IP) *net.Interface {
 				ip, _, err := net.ParseCIDR(cidr)
 
 				ip4 := ip.To4()
+
+				fmt.Println(err, ip4, ip)
 
 				if err == nil && ip4 != nil && ip.Equal(ADDR) {
 					return &i
