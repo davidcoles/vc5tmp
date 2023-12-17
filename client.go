@@ -414,6 +414,27 @@ func (b *Client) CreateService(s Service) error {
 	return nil
 }
 
+func (b *Client) UpdateService(s Service) error {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+
+	svc, err := s.svc()
+
+	if err != nil {
+		return err
+	}
+
+	service, ok := b.service[svc]
+
+	if !ok {
+		return errors.New("Service does not exist")
+	}
+
+	service.update(s)
+
+	return nil
+}
+
 func (b *Client) Service(s Service) (se ServiceExtended, e error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
