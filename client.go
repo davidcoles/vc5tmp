@@ -57,7 +57,7 @@ type Client struct {
 
 	netns *netns
 	maps  *maps
-	icmp  *ICMPs
+	icmp  *ICMP
 	nat   []natkeyval
 
 	update chan bool
@@ -163,7 +163,11 @@ func (b *Client) Start() error {
 		fmt.Println(b.netns)
 	}
 
-	var err error
+	err := b.icmp.Start()
+
+	if err != nil {
+		return err
+	}
 
 	b.maps, err = open(_BPF_O, b.Native, len(b.vlans) > 0 && b.Redirect, vetha, vethb, phy...)
 
@@ -178,8 +182,6 @@ func (b *Client) Start() error {
 			return err
 		}
 	}
-
-	b.icmp = ICMP()
 
 	b.scan_interfaces()
 
@@ -571,8 +573,8 @@ func (b *Client) CreateDestination(s Service, d Destination) error {
 
 	vr := bpf_vrpp{vip: svc.IP, rip: rip, port: htons(svc.Port), protocol: uint8(svc.Protocol)}
 	b.maps.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
-	b.maps.update_vrpp_concurrent(0, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
-	b.maps.update_vrpp_concurrent(1, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
+	b.maps.update_vrpp_concurrent(0, &vr, nil, xdp.BPF_NOEXIST)
+	b.maps.update_vrpp_concurrent(1, &vr, nil, xdp.BPF_NOEXIST)
 
 	b.update_nat_map()
 
@@ -994,7 +996,6 @@ func VlanInterface(prefix net.IPNet) (ret iface, _ bool) {
 				if err == nil && ipnet.String() == prefix.String() {
 					ip4 := ip.To4()
 					if len(ip4) == 4 && ip4 != nil {
-						//return iface{idx: uint32(i.Index), ip4: IP4{ip4[0], ip4[1], ip4[2], ip4[3]}, mac: mac}, true
 						return iface{idx: uint32(i.Index), ip4: IP4(ip4), mac: mac}, true
 					}
 				}
