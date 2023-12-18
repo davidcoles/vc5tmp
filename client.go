@@ -45,26 +45,25 @@ type Client struct {
 	VLANs      map[uint16]net.IPNet
 	NAT        bool
 	Native     bool
-	MultiNIC   bool
+	Redirect   bool
 	Address    netip.Addr // find default interface when not in VLAN mode
 
 	mutex sync.Mutex
 
 	service map[svc]*Service
+	ifaces  map[uint16]iface
+	hwaddr  map[IP4]MAC
+	vlans   map[uint16]net.IPNet // only gets updated by config change
 
-	ifaces map[uint16]iface
-	netns  *netns
-	maps   *maps
-	icmp   *ICMPs
-	nat    []natkeyval
-
-	hwaddr map[IP4]MAC
+	netns *netns
+	maps  *maps
+	icmp  *ICMPs
+	nat   []natkeyval
 
 	update chan bool
 
 	tag_map tag_map
 	nat_map nat_map
-	vlans   map[uint16]net.IPNet // only gets updated by config change
 }
 
 func (c *Client) Namespace() string {
@@ -77,6 +76,10 @@ func (c *Client) NamespaceAddress() string {
 
 func (c *Client) arp() map[IP4]MAC {
 	return arp()
+}
+
+func (c *Client) Prefixes() [PREFIXES]uint64 {
+	return c.maps.ReadPrefixCounters()
 }
 
 func (c *Client) Info() (i Info) {
@@ -125,7 +128,7 @@ func (b *Client) Start() error {
 		var default_ip IP4
 		var default_if *net.Interface
 
-		if len(b.VLANs) < 1 {
+		if len(b.vlans) < 1 {
 			// address must be present
 
 			addr := b.Address
@@ -162,7 +165,7 @@ func (b *Client) Start() error {
 
 	var err error
 
-	b.maps, err = open(b.Native, b.MultiNIC, vetha, vethb, phy...)
+	b.maps, err = open(_BPF_O, b.Native, len(b.vlans) > 0 && b.Redirect, vetha, vethb, phy...)
 
 	if err != nil {
 		return err

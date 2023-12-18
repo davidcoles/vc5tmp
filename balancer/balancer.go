@@ -45,7 +45,7 @@ func main() {
 	file := flag.String("v", "", "JSON file to read VLAN info from")
 	port := flag.Int("p", 80, "Port to run service on")
 	udp := flag.Bool("u", false, "Use UDP instead of TCP")
-	multi := flag.Bool("m", false, "Multi NIC mode")
+	tags := flag.Bool("t", false, "Tagged VLANs")
 	nat := flag.Bool("n", false, "NAT (creates a network namespace and interfaces)")
 	flag.Var(&extra, "i", "extra interfaces")
 	flag.Parse()
@@ -84,12 +84,13 @@ func main() {
 
 	client := &vc5tmp.Client{
 		Interfaces: links,
+		Address:    addr,
 		VLANs:      vlans,
 		NAT:        *nat,
-		MultiNIC:   *multi,
+		Redirect:   !*tags,
 	}
 
-	err = client.Start(addr)
+	err = client.Start()
 
 	if err != nil {
 		log.Fatal(err)
@@ -182,19 +183,19 @@ func load(file string) (map[uint16]net.IPNet, error) {
 		return nil, err
 	}
 
-	var foo map[uint16]Prefix
+	var prefixes map[uint16]Prefix
 
-	err = json.Unmarshal(b, &foo)
+	err = json.Unmarshal(b, &prefixes)
 
 	if err != nil {
 		return nil, err
 	}
 
-	bar := map[uint16]net.IPNet{}
+	vlans := map[uint16]net.IPNet{}
 
-	for k, v := range foo {
-		bar[k] = net.IPNet(v)
+	for vlanid, prefix := range prefixes {
+		vlans[vlanid] = net.IPNet(prefix)
 	}
 
-	return bar, nil
+	return vlans, nil
 }

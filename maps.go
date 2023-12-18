@@ -43,8 +43,8 @@ func BPF() []byte {
 
 type maps = Maps
 type Maps struct {
-	x           *xdp.XDP
-	m           map[string]int
+	xdp         *xdp.XDP
+	fd          map[string]int
 	setting     bpf_setting
 	features    bpf.Features
 	defcon      uint8
@@ -182,18 +182,18 @@ const (
 	_FLOW_SHARE      = "flow_share"
 )
 
-func (m *Maps) service_backend() int { return m.m[_SERVICE_BACKEND] }
-func (m *Maps) vrpp_counter() int    { return m.m[_VRPP_COUNTER] }
-func (m *Maps) vrpp_concurrent() int { return m.m[_VRPP_CONCURRENT] }
-func (m *Maps) globals() int         { return m.m[_GLOBALS] }
-func (m *Maps) settings() int        { return m.m[_SETTINGS] }
-func (m *Maps) nat() int             { return m.m[_NAT] }
-func (m *Maps) prefix_counters() int { return m.m[_PREFIX_COUNTERS] }
-func (m *Maps) prefix_drop() int     { return m.m[_PREFIX_DROP] }
-func (m *Maps) redirect_map() int    { return m.m[_REDIRECT_MAP] }
-func (m *Maps) redirect_mac() int    { return m.m[_REDIRECT_MAC] }
-func (m *Maps) flow_queue() int      { return m.m[_FLOW_QUEUE] }
-func (m *Maps) flow_share() int      { return m.m[_FLOW_SHARE] }
+func (m *Maps) service_backend() int { return m.fd[_SERVICE_BACKEND] }
+func (m *Maps) vrpp_counter() int    { return m.fd[_VRPP_COUNTER] }
+func (m *Maps) vrpp_concurrent() int { return m.fd[_VRPP_CONCURRENT] }
+func (m *Maps) globals() int         { return m.fd[_GLOBALS] }
+func (m *Maps) settings() int        { return m.fd[_SETTINGS] }
+func (m *Maps) nat() int             { return m.fd[_NAT] }
+func (m *Maps) prefix_counters() int { return m.fd[_PREFIX_COUNTERS] }
+func (m *Maps) prefix_drop() int     { return m.fd[_PREFIX_DROP] }
+func (m *Maps) redirect_map() int    { return m.fd[_REDIRECT_MAP] }
+func (m *Maps) redirect_mac() int    { return m.fd[_REDIRECT_MAC] }
+func (m *Maps) flow_queue() int      { return m.fd[_FLOW_QUEUE] }
+func (m *Maps) flow_share() int      { return m.fd[_FLOW_SHARE] }
 
 const PREFIXES = 1048576
 
@@ -704,7 +704,7 @@ func pow(x int) uint64 {
 	return 0
 }
 
-func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error) {
+func open(obj []byte, native, multi bool, vetha, vethb string, eth ...string) (*Maps, error) {
 
 	err := ulimit_l()
 
@@ -713,32 +713,31 @@ func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error)
 	}
 
 	var m maps
-	m.m = make(map[string]int)
+	m.fd = make(map[string]int)
 	m.defcon = 5
 
-	x, err := xdp.LoadBpfProgram(_BPF_O)
-	m.x = x
+	m.xdp, err = xdp.LoadBpfProgram(_BPF_O)
 
 	if err != nil {
 		return nil, err
 	}
 
 	if vetha != "" {
-		err = x.LoadBpfSection("outgoing", false, vetha)
+		err = m.xdp.LoadBpfSection("veth", false, vetha)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	if vethb != "" {
-		err = x.LoadBpfSection("outgoing", true, vethb)
+		err = m.xdp.LoadBpfSection("veth", true, vethb)
 		if err != nil {
 			return nil, err
 		}
 	}
 
 	for _, e := range eth {
-		err = x.LoadBpfSection("incoming", native, e)
+		err = m.xdp.LoadBpfSection("real", native, e)
 		if err != nil {
 			return nil, err
 		}
@@ -791,22 +790,18 @@ func open(native, multi bool, vetha, vethb string, eth ...string) (*Maps, error)
 }
 
 func (m *Maps) set_map(name string, k, v int) (err error) {
-	m.m[name], err = find_map(m.x, name, k, v)
+	m.fd[name], err = find_map(m.xdp, name, k, v)
 	return err
 }
 
 func ulimit_l() error {
-	//const RLIMIT_MEMLOCK = 8
-
-	var resource int = xdp.RLIMIT_MEMLOCK
-
 	var rLimit syscall.Rlimit
-	if err := syscall.Getrlimit(resource, &rLimit); err != nil {
+	if err := syscall.Getrlimit(xdp.RLIMIT_MEMLOCK, &rLimit); err != nil {
 		return err
 	}
 	rLimit.Max = 0xffffffffffffffff
 	rLimit.Cur = 0xffffffffffffffff
-	if err := syscall.Setrlimit(resource, &rLimit); err != nil {
+	if err := syscall.Setrlimit(xdp.RLIMIT_MEMLOCK, &rLimit); err != nil {
 		return err
 	}
 	return nil

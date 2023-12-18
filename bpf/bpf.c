@@ -886,7 +886,7 @@ static __always_inline int perf(struct context *context, int ret) {
 }
 
 //SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
-int xdp_main_func(struct xdp_md *ctx, int outgoing)
+int xdp_main_func(struct xdp_md *ctx, int veth)
 {
     __u64 start = bpf_ktime_get_ns();
     __u64 start_s = start / SECOND_NS;
@@ -1009,7 +1009,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	if (data + nh_off > data_end)
 	    return XDP_DROP;
 	
-	if (outgoing)
+	if (veth)
 	    goto OUTGOING_PROBE;
 	
 	// respond to pings to configured VIPs
@@ -1026,7 +1026,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	if (data + nh_off > data_end)
 	    return XDP_DROP;
 	
-	if (outgoing)
+	if (veth)
 	    goto OUTGOING_PROBE;
 	
 	switch ((action = new_flow(&context, udp->source, udp->dest, octets))) {
@@ -1050,7 +1050,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	if (data + nh_off > data_end)
 	    return XDP_DROP;
 	
-	if (outgoing)
+	if (veth)
 	    goto OUTGOING_PROBE;
 
 	switch ((action = existing_tcp_flow(&context))) {
@@ -1105,12 +1105,12 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 }
 
 
-SEC("incoming") int xdp_main_func0(struct xdp_md *ctx)
+SEC("real") int xdp_main_real(struct xdp_md *ctx)
 {
     return xdp_main_func(ctx, 0);
 }
 
-SEC("outgoing") int xdp_main_func2(struct xdp_md *ctx)
+SEC("veth") int xdp_main_veth(struct xdp_md *ctx)
 {
     return xdp_main_func(ctx, 1);   
 }
